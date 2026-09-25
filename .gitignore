@@ -1,0 +1,9 @@
+target/
+admin-ui-src/target/
+admin-ui-src/node_modules/
+admin-ui-src/assets/tailwind.out.css
+embedded/admin-ui/*
+!embedded/admin-ui/index.html
+data/
+*.sqlite3*
+register/
