@@ -52,13 +52,16 @@ pub fn create(name: &str, rate_limit: i64) -> (UserApiKey, String) {
     let raw = generate_raw();
     let hash = hash_key(&raw);
     let prefix: String = raw.chars().take(20).collect();
-    let conn = db();
-    conn.execute(
-        "INSERT INTO user_api_key (name, key_hash, key_prefix, rate_limit) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![name, hash, prefix, rate_limit],
-    )
-    .unwrap();
-    let id = conn.last_insert_rowid();
+    // 注意: db() 是非重入 Mutex — 必须先释放 guard 再调 get_by_id, 否则死锁
+    let id = {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO user_api_key (name, key_hash, key_prefix, rate_limit) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![name, hash, prefix, rate_limit],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    };
     let k = get_by_id(id).expect("just inserted");
     (k, raw)
 }
