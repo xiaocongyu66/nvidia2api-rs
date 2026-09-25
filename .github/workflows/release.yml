@@ -40,7 +40,7 @@ jobs:
           # 预压缩 (服务端 Content-Encoding: gzip 直接下发)
           find embedded/admin-ui -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.css' -o -name '*.html' \) -exec gzip -9 -kf {} \;
       - name: test (纯 Rust 单测, 无需 wasm)
-        run: cargo test --lib --bins
+        run: cargo test --bins
       - name: build rust 主程序 (web 已内嵌)
         run: cargo build --release
       - name: package (单文件 — web 内嵌)
