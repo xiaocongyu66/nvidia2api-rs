@@ -1112,35 +1112,35 @@ fn Register() -> Element {
 
 #[component]
 fn RegConfigForm(c: Value) -> Element {
-    let mut email_provider = use_signal(|| trim_text(&c, "email_provider"));
-    let mut cf_api_url = use_signal(|| trim_text(&c, "cf_api_url"));
-    let mut cf_admin_auth = use_signal(|| trim_text(&c, "cf_admin_auth"));
-    let mut cf_domain = use_signal(|| trim_text(&c, "cf_domain"));
-    let mut duck_api_url = use_signal(|| trim_text(&c, "duck_api_url"));
-    let mut duck_domain = use_signal(|| trim_text(&c, "duck_domain"));
-    let mut duck_api_key = use_signal(|| trim_text(&c, "duck_api_key"));
-    let mut captcha_mode = use_signal(|| trim_text(&c, "captcha_mode"));
-    let mut yescaptcha_key = use_signal(|| trim_text(&c, "yescaptcha_key"));
-    let mut captcharun_token = use_signal(|| trim_text(&c, "captcharun_token"));
-    let mut headless = use_signal(|| c["headless"].as_bool().unwrap_or(true));
-    let mut org_name = use_signal(|| trim_text(&c, "org_name"));
-    let mut key_expiry = use_signal(|| trim_text(&c, "key_expiry"));
-    let mut msg = use_signal(String::new);
-    let mut err = use_signal(String::new);
+    let email_provider_v = trim_text(&c, "email_provider");
+    let cf_api_url_v = trim_text(&c, "cf_api_url");
+    let cf_admin_auth_v = trim_text(&c, "cf_admin_auth");
+    let cf_domain_v = trim_text(&c, "cf_domain");
+    let duck_api_url_v = trim_text(&c, "duck_api_url");
+    let duck_domain_v = trim_text(&c, "duck_domain");
+    let duck_api_key_v = trim_text(&c, "duck_api_key");
+    let captcha_mode_v = trim_text(&c, "captcha_mode");
+    let yescaptcha_key_v = trim_text(&c, "yescaptcha_key");
+    let captcharun_token_v = trim_text(&c, "captcharun_token");
+    let headless_v = c["headless"].as_bool().unwrap_or(true);
+    let org_name_v = trim_text(&c, "org_name");
+    let key_expiry_v = trim_text(&c, "key_expiry");
 
-    let field = |label: &'static str, sig: Signal<String>, placeholder: &'static str| {
-        rsx! {
-            div { class: "mb-2",
-                label { class: "mb-1 block text-xs text-dim", {label} }
-                input {
-                    class: "w-full rounded border border-line bg-shell px-3 py-1.5 text-sm focus:border-nvgreen focus:outline-none",
-                    value: sig(),
-                    oninput: move |e| sig.set(e.value()),
-                    placeholder: placeholder,
-                }
-            }
-        }
-    };
+    let mut email_provider = use_signal(move || email_provider_v.clone());
+    let mut cf_api_url = use_signal(move || cf_api_url_v.clone());
+    let mut cf_admin_auth = use_signal(move || cf_admin_auth_v.clone());
+    let mut cf_domain = use_signal(move || cf_domain_v.clone());
+    let mut duck_api_url = use_signal(move || duck_api_url_v.clone());
+    let mut duck_domain = use_signal(move || duck_domain_v.clone());
+    let mut duck_api_key = use_signal(move || duck_api_key_v.clone());
+    let mut captcha_mode = use_signal(move || captcha_mode_v.clone());
+    let mut yescaptcha_key = use_signal(move || yescaptcha_key_v.clone());
+    let mut captcharun_token = use_signal(move || captcharun_token_v.clone());
+    let mut headless = use_signal(move || headless_v);
+    let mut org_name = use_signal(move || org_name_v.clone());
+    let mut key_expiry = use_signal(move || key_expiry_v.clone());
+    let mut msg = use_signal(|| String::new());
+    let mut err = use_signal(|| String::new());
 
     rsx! {
         div { class: "rounded-lg border border-line bg-panel p-4",
@@ -1165,16 +1165,16 @@ fn RegConfigForm(c: Value) -> Element {
                         option { value: "captcharun", "CaptchaRun" }
                     }
                 }
-                {field("CF API URL", cf_api_url, "https://your-cf-temp-email.example")}
-                {field("CF Admin Auth", cf_admin_auth, "x-admin-auth 值")}
-                {field("CF 邮箱域名", cf_domain, "mail.example.com")}
-                {field("DuckMail API", duck_api_url, "https://api.duckmail.sbs")}
-                {field("DuckMail 域名", duck_domain, "duckmail.sbs")}
-                {field("DuckMail Key", duck_api_key, "")}
-                {field("YesCaptcha Key", yescaptcha_key, "clientKey")}
-                {field("CaptchaRun Token", captcharun_token, "Bearer token")}
-                {field("组织名 (跳过手机验证)", org_name, "nvidia2api-org")}
-                {field("Key 过期日", key_expiry, "2028-01-01")}
+                RegField { label: "CF API URL".to_string(), value: cf_api_url(), placeholder: "https://your-cf-temp-email.example".to_string(), oninput: move |v| cf_api_url.set(v) }
+                RegField { label: "CF Admin Auth".to_string(), value: cf_admin_auth(), placeholder: "x-admin-auth 值".to_string(), oninput: move |v| cf_admin_auth.set(v) }
+                RegField { label: "CF 邮箱域名".to_string(), value: cf_domain(), placeholder: "mail.example.com".to_string(), oninput: move |v| cf_domain.set(v) }
+                RegField { label: "DuckMail API".to_string(), value: duck_api_url(), placeholder: "https://api.duckmail.sbs".to_string(), oninput: move |v| duck_api_url.set(v) }
+                RegField { label: "DuckMail 域名".to_string(), value: duck_domain(), placeholder: "duckmail.sbs".to_string(), oninput: move |v| duck_domain.set(v) }
+                RegField { label: "DuckMail Key".to_string(), value: duck_api_key(), placeholder: "".to_string(), oninput: move |v| duck_api_key.set(v) }
+                RegField { label: "YesCaptcha Key".to_string(), value: yescaptcha_key(), placeholder: "clientKey".to_string(), oninput: move |v| yescaptcha_key.set(v) }
+                RegField { label: "CaptchaRun Token".to_string(), value: captcharun_token(), placeholder: "Bearer token".to_string(), oninput: move |v| captcharun_token.set(v) }
+                RegField { label: "组织名 (跳过手机验证)".to_string(), value: org_name(), placeholder: "nvidia2api-org".to_string(), oninput: move |v| org_name.set(v) }
+                RegField { label: "Key 过期日".to_string(), value: key_expiry(), placeholder: "2028-01-01".to_string(), oninput: move |v| key_expiry.set(v) }
                 div { class: "mb-2",
                     label { class: "mb-1 block text-xs text-dim", "无头浏览器" }
                     button {
@@ -1209,6 +1209,17 @@ fn RegConfigForm(c: Value) -> Element {
     }
 }
 
-fn main() {
-    dioxus::launch(App);
+#[component]
+fn RegField(label: String, value: String, placeholder: String, oninput: EventHandler<String>) -> Element {
+    rsx! {
+        div { class: "mb-2",
+            label { class: "mb-1 block text-xs text-dim", {label} }
+            input {
+                class: "w-full rounded border border-line bg-shell px-3 py-1.5 text-sm focus:border-nvgreen focus:outline-none",
+                value: value,
+                oninput: move |e| oninput.call(e.value()),
+                placeholder: placeholder,
+            }
+        }
+    }
 }
