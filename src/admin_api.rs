@@ -735,3 +735,83 @@ pub async fn logs(State(state): State<Arc<AppState>>, headers: HeaderMap, axum::
         .collect();
     ok_json(json!({"items": items, "total": items.len()}))
 }
+
+// ---------------------------------------------------------------------------
+// register (注册机)
+// ---------------------------------------------------------------------------
+
+pub async fn register_status(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    ok_json(crate::register::snapshot())
+}
+
+pub async fn register_start(State(state): State<Arc<AppState>>, headers: HeaderMap, body: axum::extract::Json<Value>) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let count = body.0.get("count").and_then(|c| c.as_u64()).unwrap_or(1).min(50) as u32;
+    match crate::register::start(count) {
+        Ok(()) => ok_json(json!({"ok": true, "count": count})),
+        Err(e) => err_json(&e, 400),
+    }
+}
+
+pub async fn register_stop(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    crate::register::stop();
+    ok_json(json!({"ok": true}))
+}
+
+pub async fn register_config(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let c = crate::register::load_config();
+    ok_json(json!({
+        "email_provider": c.email_provider, "cf_api_url": c.cf_api_url, "cf_admin_auth": c.cf_admin_auth,
+        "cf_domain": c.cf_domain, "duck_api_url": c.duck_api_url, "duck_domain": c.duck_domain,
+        "duck_api_key": c.duck_api_key, "captcha_mode": c.captcha_mode, "yescaptcha_key": c.yescaptcha_key,
+        "captcharun_token": c.captcharun_token, "headless": c.headless, "org_name": c.org_name,
+        "key_name": c.key_name, "key_expiry": c.key_expiry,
+    }))
+}
+
+pub async fn register_config_save(State(state): State<Arc<AppState>>, headers: HeaderMap, body: axum::extract::Json<Value>) -> Response {
+    if let Some(r) = guard(&state, &headers) {
+        return r;
+    }
+    let v = body.0;
+    let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+    let cfg = crate::register::RegConfig {
+        email_provider: s("email_provider"),
+        cf_api_url: s("cf_api_url"),
+        cf_admin_auth: s("cf_admin_auth"),
+        cf_domain: s("cf_domain"),
+        duck_api_url: s("duck_api_url"),
+        duck_domain: s("duck_domain"),
+        duck_api_key: s("duck_api_key"),
+        captcha_mode: s("captcha_mode"),
+        yescaptcha_key: s("yescaptcha_key"),
+        captcharun_token: s("captcharun_token"),
+        headless: v["headless"].as_bool().unwrap_or(true),
+        org_name: {
+            let o = s("org_name");
+            if o.is_empty() { "nvidia2api-org".into() } else { o }
+        },
+        key_name: {
+            let k = s("key_name");
+            if k.is_empty() { "AI_PLAYGROUNDS_KEY".into() } else { k }
+        },
+        key_expiry: {
+            let e = s("key_expiry");
+            if e.is_empty() { "2028-01-01".into() } else { e }
+        },
+        key_rpm: v["key_rpm"].as_i64().unwrap_or(40),
+    };
+    crate::register::save_config(&cfg);
+    ok_json(json!({"ok": true}))
+}

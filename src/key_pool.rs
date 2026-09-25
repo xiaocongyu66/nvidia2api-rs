@@ -224,6 +224,17 @@ pub fn bulk_import(text: &str, default_rpm: i64) -> ImportResult {
     result
 }
 
+/// 注册机专用: 以邮箱命名插入, 已存在返回 false。
+pub fn insert_named(name: &str, api_key: &str, rpm: i64) -> bool {
+    let conn = db();
+    conn.execute(
+        "INSERT OR IGNORE INTO nvidia_api_key (name, api_key, rpm_limit) VALUES (?1, ?2, ?3)",
+        rusqlite::params![name, api_key, rpm],
+    )
+    .map(|n| n > 0)
+    .unwrap_or(false)
+}
+
 pub fn set_status(key_id: i64, status: &str) -> bool {
     db().execute(
         "UPDATE nvidia_api_key SET status = ?1, updated_at = ?2 WHERE id = ?3",

@@ -81,6 +81,8 @@ enum Route {
     Logs {},
     #[route("/settings")]
     Settings {},
+    #[route("/register")]
+    Register {},
 }
 
 #[component]
@@ -169,6 +171,7 @@ fn ConsoleLayout() -> Element {
                     NavLink { to: Route::UKeys {}, label: "API Keys".to_string() }
                     NavLink { to: Route::Logs {}, label: "日志".to_string() }
                     NavLink { to: Route::Settings {}, label: "设置".to_string() }
+                    NavLink { to: Route::Register {}, label: "注册机".to_string() }
                     span { class: "ml-auto text-xs text-dim",
                         button {
                             class: "rounded border border-line px-2 py-1 text-xs text-dim hover:text-ink",
@@ -385,21 +388,21 @@ fn Keys() -> Element {
                     th { class: "p-2.5 font-medium", "成功/失败" } th { class: "p-2.5 font-medium", "冷却至" }
                     th { class: "p-2.5 font-medium", "最后错误" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { for k in items() {
+                tbody { for k in items().iter() {
                     tr { class: "border-t border-line",
-                        td { class: "p-2.5 font-medium", {trim_text(&k, "name")} }
-                        td { class: "p-2.5 font-data text-xs text-dim", {trim_text(&k, "masked_key")} }
-                        td { class: "p-2.5", Tag { status: trim_text(&k, "status") } }
-                        td { class: "p-2.5", {format!("{}", num_i64(&k, "rpm_limit"))} }
-                        td { class: "p-2.5", {format!("{}/{}", num_i64(&k, "success_count"), num_i64(&k, "failure_count"))} }
-                        td { class: "p-2.5 text-xs text-dim", {trim_text(&k, "cooldown_until")} }
-                        td { class: "p-2.5 text-xs text-down", {trim_text(&k, "last_error")} }
+                        td { class: "p-2.5 font-medium", {trim_text(k, "name")} }
+                        td { class: "p-2.5 font-data text-xs text-dim", {trim_text(k, "masked_key")} }
+                        td { class: "p-2.5", Tag { status: trim_text(k, "status") } }
+                        td { class: "p-2.5", {format!("{}", num_i64(k, "rpm_limit"))} }
+                        td { class: "p-2.5", {format!("{}/{}", num_i64(k, "success_count"), num_i64(k, "failure_count"))} }
+                        td { class: "p-2.5 text-xs text-dim", {trim_text(k, "cooldown_until")} }
+                        td { class: "p-2.5 text-xs text-down", {trim_text(k, "last_error")} }
                         td { class: "p-2.5",
                             div { class: "flex gap-1.5",
                                 button {
                                     class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
                                     onclick: move |_| {
-                                        let id = num_i64(&k, "id");
+                                        let id = num_i64(k, "id");
                                         spawn(async move {
                                             match api_send("POST", &format!("/api/admin/nvidia-keys/{id}/test"), None).await {
                                                 Ok(v) => {
@@ -415,8 +418,8 @@ fn Keys() -> Element {
                                 button {
                                     class: "rounded border border-line px-2 py-1 text-xs hover:text-hold",
                                     onclick: move |_| {
-                                        let id = num_i64(&k, "id");
-                                        let st = if trim_text(&k, "status") == "disabled" { "available" } else { "disabled" };
+                                        let id = num_i64(k, "id");
+                                        let st = if trim_text(k, "status") == "disabled" { "available" } else { "disabled" };
                                         spawn(async move {
                                             match api_send("PUT", &format!("/api/admin/nvidia-keys/{id}"), Some(serde_json::json!({"status": st}))).await {
                                                 Ok(_) => tick.set(tick() + 1),
@@ -424,12 +427,12 @@ fn Keys() -> Element {
                                             }
                                         });
                                     },
-                                    {if trim_text(&k, "status") == "disabled" { "启用" } else { "禁用" }}
+                                    {if trim_text(k, "status") == "disabled" { "启用" } else { "禁用" }}
                                 }
                                 button {
                                     class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
                                     onclick: move |_| {
-                                        let id = num_i64(&k, "id");
+                                        let id = num_i64(k, "id");
                                         spawn(async move {
                                             match api_send("DELETE", &format!("/api/admin/nvidia-keys/{id}"), None).await {
                                                 Ok(_) => tick.set(tick() + 1),
@@ -532,26 +535,26 @@ fn Proxies() -> Element {
                     th { class: "p-2.5 font-medium", "公网 IP" } th { class: "p-2.5 font-medium", "位置" }
                     th { class: "p-2.5 font-medium", "成功/失败" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { for p in items() {
+                tbody { for p in items().iter() {
                     tr { class: "border-t border-line",
-                        td { class: "p-2.5 font-medium", {trim_text(&p, "name")} }
-                        td { class: "p-2.5 text-xs text-dim", {trim_text(&p, "protocol")} }
+                        td { class: "p-2.5 font-medium", {trim_text(p, "name")} }
+                        td { class: "p-2.5 text-xs text-dim", {trim_text(p, "protocol")} }
                         td { class: "p-2.5",
                             div { class: "flex items-center gap-2",
-                                Tag { status: trim_text(&p, "status") }
+                                Tag { status: trim_text(p, "status") }
                                 if p["enabled"].as_bool().unwrap_or(false) { Tag { status: "enabled".to_string() } }
                             }
                         }
                         td { class: "p-2.5", {match p["latency_ms"].as_f64() { Some(l) => format!("{l:.0}ms"), None => "-".into() }} }
-                        td { class: "p-2.5 text-xs", {trim_text(&p, "public_ip")} }
-                        td { class: "p-2.5 text-xs text-dim", {format!("{} {}", trim_text(&p, "country"), trim_text(&p, "city"))} }
-                        td { class: "p-2.5", {format!("{}/{}", num_i64(&p, "success_count"), num_i64(&p, "failure_count"))} }
+                        td { class: "p-2.5 text-xs", {trim_text(p, "public_ip")} }
+                        td { class: "p-2.5 text-xs text-dim", {format!("{} {}", trim_text(p, "country"), trim_text(p, "city"))} }
+                        td { class: "p-2.5", {format!("{}/{}", num_i64(p, "success_count"), num_i64(p, "failure_count"))} }
                         td { class: "p-2.5",
                             div { class: "flex gap-1.5",
                                 button {
                                     class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
                                     onclick: move |_| {
-                                        let id = num_i64(&p, "id");
+                                        let id = num_i64(p, "id");
                                         let enable = !p["enabled"].as_bool().unwrap_or(false);
                                         spawn(async move {
                                             match api_send("PUT", &format!("/api/admin/proxies/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
@@ -565,7 +568,7 @@ fn Proxies() -> Element {
                                 button {
                                     class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
                                     onclick: move |_| {
-                                        let id = num_i64(&p, "id");
+                                        let id = num_i64(p, "id");
                                         spawn(async move {
                                             match api_send("POST", &format!("/api/admin/proxies/{id}/fetch-ip"), None).await {
                                                 Ok(v) => {
@@ -582,7 +585,7 @@ fn Proxies() -> Element {
                                 button {
                                     class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
                                     onclick: move |_| {
-                                        let id = num_i64(&p, "id");
+                                        let id = num_i64(p, "id");
                                         spawn(async move {
                                             match api_send("DELETE", &format!("/api/admin/proxies/{id}"), None).await {
                                                 Ok(_) => tick.set(tick() + 1),
@@ -657,16 +660,16 @@ fn Groups() -> Element {
                     th { class: "p-2.5 font-medium", "名称" } th { class: "p-2.5 font-medium", "国家" }
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { for g in items() {
+                tbody { for g in items().iter() {
                     tr { class: "border-t border-line",
-                        td { class: "p-2.5 font-medium", {trim_text(&g, "name")} }
-                        td { class: "p-2.5", {trim_text(&g, "country")} }
+                        td { class: "p-2.5 font-medium", {trim_text(g, "name")} }
+                        td { class: "p-2.5", {trim_text(g, "country")} }
                         td { class: "p-2.5", Tag { status: if g["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
                         td { class: "p-2.5",
                             button {
                                 class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
                                 onclick: move |_| {
-                                    let id = num_i64(&g, "id");
+                                    let id = num_i64(g, "id");
                                     spawn(async move {
                                         match api_send("DELETE", &format!("/api/admin/proxy-groups/{id}"), None).await {
                                             Ok(_) => tick.set(tick() + 1),
@@ -737,16 +740,16 @@ fn Models() -> Element {
                     th { class: "p-2.5 font-medium", "模型" } th { class: "p-2.5 font-medium", "Provider" }
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { for m in items() {
+                tbody { for m in items().iter() {
                     tr { class: "border-t border-line",
-                        td { class: "p-2.5 font-data text-xs", {trim_text(&m, "model_name")} }
-                        td { class: "p-2.5 text-dim", {trim_text(&m, "provider")} }
+                        td { class: "p-2.5 font-data text-xs", {trim_text(m, "model_name")} }
+                        td { class: "p-2.5 text-dim", {trim_text(m, "provider")} }
                         td { class: "p-2.5", Tag { status: if m["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
                         td { class: "p-2.5",
                             button {
                                 class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
                                 onclick: move |_| {
-                                    let id = num_i64(&m, "id");
+                                    let id = num_i64(m, "id");
                                     let enable = !m["enabled"].as_bool().unwrap_or(false);
                                     spawn(async move {
                                         match api_send("PUT", &format!("/api/admin/models/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
@@ -825,18 +828,18 @@ fn UKeys() -> Element {
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "总/成/败" }
                     th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { for k in items() {
+                tbody { for k in items().iter() {
                     tr { class: "border-t border-line",
-                        td { class: "p-2.5 font-medium", {trim_text(&k, "name")} }
-                        td { class: "p-2.5 font-data text-xs text-dim", {trim_text(&k, "key_prefix")} }
+                        td { class: "p-2.5 font-medium", {trim_text(k, "name")} }
+                        td { class: "p-2.5 font-data text-xs text-dim", {trim_text(k, "key_prefix")} }
                         td { class: "p-2.5", Tag { status: if k["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
-                        td { class: "p-2.5", {format!("{}/{}/{}", num_i64(&k, "total_requests"), num_i64(&k, "success_requests"), num_i64(&k, "failed_requests"))} }
+                        td { class: "p-2.5", {format!("{}/{}/{}", num_i64(k, "total_requests"), num_i64(k, "success_requests"), num_i64(k, "failed_requests"))} }
                         td { class: "p-2.5",
                             div { class: "flex gap-1.5",
                                 button {
                                     class: "rounded border border-line px-2 py-1 text-xs hover:text-hold",
                                     onclick: move |_| {
-                                        let id = num_i64(&k, "id");
+                                        let id = num_i64(k, "id");
                                         let enable = !k["enabled"].as_bool().unwrap_or(false);
                                         spawn(async move {
                                             match api_send("PUT", &format!("/api/admin/api-keys/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
@@ -850,7 +853,7 @@ fn UKeys() -> Element {
                                 button {
                                     class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
                                     onclick: move |_| {
-                                        let id = num_i64(&k, "id");
+                                        let id = num_i64(k, "id");
                                         spawn(async move {
                                             match api_send("DELETE", &format!("/api/admin/api-keys/{id}"), None).await {
                                                 Ok(_) => tick.set(tick() + 1),
@@ -909,20 +912,20 @@ fn Logs() -> Element {
                     th { class: "p-2.5 font-medium", "Key" } th { class: "p-2.5 font-medium", "Tokens" }
                     th { class: "p-2.5 font-medium", "错误" }
                 } }
-                tbody { for l in items() {
+                tbody { for l in items().iter() {
                     tr { class: "border-t border-line",
-                        td { class: "p-2.5 text-xs text-dim", {trim_text(&l, "created_at")} }
-                        td { class: "p-2.5 font-data text-xs", {trim_text(&l, "model")} }
-                        td { class: "p-2.5", Tag { status: trim_text(&l, "status") } }
-                        td { class: "p-2.5", {format!("{:.0}ms", num_f64(&l, "duration_ms"))} }
+                        td { class: "p-2.5 text-xs text-dim", {trim_text(l, "created_at")} }
+                        td { class: "p-2.5 font-data text-xs", {trim_text(l, "model")} }
+                        td { class: "p-2.5", Tag { status: trim_text(l, "status") } }
+                        td { class: "p-2.5", {format!("{:.0}ms", num_f64(l, "duration_ms"))} }
                         td { class: "p-2.5", {match l["first_token_ms"].as_f64() { Some(t) => format!("{t:.0}ms"), None => "-".into() }} }
                         td { class: "p-2.5 text-xs",
-                            span { class: "text-dim", {trim_text(&l, "winner_route_type")} " · " }
-                            span { {trim_text(&l, "winner_proxy_name")} }
+                            span { class: "text-dim", {trim_text(l, "winner_route_type")} " · " }
+                            span { {trim_text(l, "winner_proxy_name")} }
                         }
-                        td { class: "p-2.5 text-xs", {trim_text(&l, "winner_key_name")} }
-                        td { class: "p-2.5 text-xs text-dim", {format!("{}", num_i64(&l, "total_tokens"))} }
-                        td { class: "p-2.5 text-xs text-down", {format!("{} {}", trim_text(&l, "error_type"), num_i64(&l, "http_status"))} }
+                        td { class: "p-2.5 text-xs", {trim_text(l, "winner_key_name")} }
+                        td { class: "p-2.5 text-xs text-dim", {format!("{}", num_i64(l, "total_tokens"))} }
+                        td { class: "p-2.5 text-xs text-down", {format!("{} {}", trim_text(l, "error_type"), num_i64(l, "http_status"))} }
                     }
                 } }
             }
@@ -990,6 +993,218 @@ fn Settings() -> Element {
                 }
             },
             None => rsx! {},
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 注册机
+// ---------------------------------------------------------------------------
+
+fn sleep_ms(ms: i32) -> wasm_bindgen_futures::JsFuture {
+    let p = js_sys::Promise::new(&mut |resolve, _| {
+        let _ = web_sys::window()
+            .expect("no window")
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
+    });
+    wasm_bindgen_futures::JsFuture::from(p)
+}
+
+#[component]
+fn Register() -> Element {
+    let mut cfg: Signal<Option<Value>> = use_signal(|| None);
+    let mut status: Signal<Option<Value>> = use_signal(|| None);
+    let mut err = use_signal(String::new);
+    let mut msg = use_signal(String::new);
+    let mut count = use_signal(|| "1".to_string());
+
+    // 初始: 配置 + 状态
+    use_future(move || async move {
+        if let Ok(v) = api_get("/api/admin/register/config").await {
+            cfg.set(Some(v));
+        }
+        if let Ok(v) = api_get("/api/admin/register/status").await {
+            status.set(Some(v));
+        }
+    });
+
+    // 状态轮询 (3s)
+    use_future(move || async move {
+        loop {
+            if let Ok(v) = api_get("/api/admin/register/status").await {
+                status.set(Some(v));
+            }
+            let _ = sleep_ms(3000).await;
+        }
+    });
+
+    rsx! {
+        PageHead { title: "注册机".to_string(), desc: "NVIDIA BUILD 账号自动注册 (playwright) · 成功即入 Key 池".to_string() }
+        ErrBox { msg: err() }
+        if !msg().is_empty() { div { class: "mb-3 border-l-[3px] border-nvgreen bg-nvgreen/10 px-4 py-2 text-sm text-alive", {msg()} } }
+
+        // 运行状态
+        match status() {
+            Some(st) => rsx! {
+                div { class: "mb-4 rounded-lg border border-line bg-panel p-4",
+                    div { class: "flex flex-wrap items-center gap-x-5 gap-y-1 text-sm",
+                        span { class: if st["running"].as_bool().unwrap_or(false) { "font-bold text-nvgreen" } else { "font-bold text-dim" },
+                            {if st["running"].as_bool().unwrap_or(false) { "● 运行中" } else { "○ 空闲" }} }
+                        span { class: "text-dim", "进度 " b { class: "text-ink", {format!("{}/{}", num_i64(&st, "done"), num_i64(&st, "count"))} } }
+                        span { class: "text-alive", {format!("成功 {}", num_i64(&st, "ok"))} }
+                        span { class: "text-down", {format!("失败 {}", num_i64(&st, "fail"))} }
+                        span { class: "text-nvgreen", {format!("入库 {}", num_i64(&st, "imported"))} }
+                        if st["running"].as_bool().unwrap_or(false) {
+                            button {
+                                class: "ml-auto rounded border border-down/40 px-3 py-1 text-xs text-down hover:bg-down/10",
+                                onclick: move |_| {
+                                    spawn(async move {
+                                        match api_send("POST", "/api/admin/register/stop", None).await {
+                                            Ok(_) => msg.set("已发送停止信号 (当前账号完成后退出)".into()),
+                                            Err(e) => err.set(e),
+                                        }
+                                    });
+                                },
+                                "停止"
+                            }
+                        }
+                    }
+                    pre { class: "mt-3 max-h-64 overflow-y-auto rounded bg-shell p-3 font-data text-xs text-dim",
+                        {st["logs"].as_array().cloned().unwrap_or_default().iter().map(|l| l.as_str().unwrap_or("").to_string()).collect::<Vec<_>>().join("\n")}
+                    }
+                }
+            },
+            None => rsx! {},
+        }
+
+        // 启动
+        div { class: "mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel p-4",
+            input {
+                class: "w-24 rounded border border-line bg-shell px-3 py-1.5 text-sm focus:border-nvgreen focus:outline-none",
+                value: count(),
+                oninput: move |e| count.set(e.value()),
+                placeholder: "数量",
+            }
+            button {
+                class: "rounded bg-nvgreen px-4 py-1.5 text-sm font-bold text-black hover:opacity-90",
+                onclick: move |_| {
+                    let n: u64 = count().parse().unwrap_or(1);
+                    spawn(async move {
+                        match api_send("POST", "/api/admin/register/start", Some(serde_json::json!({"count": n}))).await {
+                            Ok(_) => msg.set(format!("已启动 {n} 个注册任务")),
+                            Err(e) => err.set(e),
+                        }
+                    });
+                },
+                "开始注册"
+            }
+        }
+
+        // 配置表单
+        match cfg() {
+            Some(c) => rsx! {
+                RegConfigForm { c: c }
+            },
+            None => rsx! { div { class: "text-dim", "配置加载中…" } },
+        }
+    }
+}
+
+#[component]
+fn RegConfigForm(c: Value) -> Element {
+    let mut email_provider = use_signal(|| trim_text(&c, "email_provider"));
+    let mut cf_api_url = use_signal(|| trim_text(&c, "cf_api_url"));
+    let mut cf_admin_auth = use_signal(|| trim_text(&c, "cf_admin_auth"));
+    let mut cf_domain = use_signal(|| trim_text(&c, "cf_domain"));
+    let mut duck_api_url = use_signal(|| trim_text(&c, "duck_api_url"));
+    let mut duck_domain = use_signal(|| trim_text(&c, "duck_domain"));
+    let mut duck_api_key = use_signal(|| trim_text(&c, "duck_api_key"));
+    let mut captcha_mode = use_signal(|| trim_text(&c, "captcha_mode"));
+    let mut yescaptcha_key = use_signal(|| trim_text(&c, "yescaptcha_key"));
+    let mut captcharun_token = use_signal(|| trim_text(&c, "captcharun_token"));
+    let mut headless = use_signal(|| c["headless"].as_bool().unwrap_or(true));
+    let mut org_name = use_signal(|| trim_text(&c, "org_name"));
+    let mut key_expiry = use_signal(|| trim_text(&c, "key_expiry"));
+    let mut msg = use_signal(String::new);
+    let mut err = use_signal(String::new);
+
+    let field = |label: &'static str, sig: Signal<String>, placeholder: &'static str| {
+        rsx! {
+            div { class: "mb-2",
+                label { class: "mb-1 block text-xs text-dim", {label} }
+                input {
+                    class: "w-full rounded border border-line bg-shell px-3 py-1.5 text-sm focus:border-nvgreen focus:outline-none",
+                    value: sig(),
+                    oninput: move |e| sig.set(e.value()),
+                    placeholder: placeholder,
+                }
+            }
+        }
+    };
+
+    rsx! {
+        div { class: "rounded-lg border border-line bg-panel p-4",
+            div { class: "grid gap-x-6 md:grid-cols-2",
+                div { class: "mb-2",
+                    label { class: "mb-1 block text-xs text-dim", "邮箱服务" }
+                    select {
+                        class: "w-full rounded border border-line bg-shell px-3 py-1.5 text-sm",
+                        value: email_provider(),
+                        onchange: move |e| email_provider.set(e.value()),
+                        option { value: "cloudflare_temp_email", "cloudflare_temp_email (自部署)" }
+                        option { value: "duckmail", "duckmail" }
+                    }
+                }
+                div { class: "mb-2",
+                    label { class: "mb-1 block text-xs text-dim", "验证码模式" }
+                    select {
+                        class: "w-full rounded border border-line bg-shell px-3 py-1.5 text-sm",
+                        value: captcha_mode(),
+                        onchange: move |e| captcha_mode.set(e.value()),
+                        option { value: "yescaptcha", "YesCaptcha" }
+                        option { value: "captcharun", "CaptchaRun" }
+                    }
+                }
+                {field("CF API URL", cf_api_url, "https://your-cf-temp-email.example")}
+                {field("CF Admin Auth", cf_admin_auth, "x-admin-auth 值")}
+                {field("CF 邮箱域名", cf_domain, "mail.example.com")}
+                {field("DuckMail API", duck_api_url, "https://api.duckmail.sbs")}
+                {field("DuckMail 域名", duck_domain, "duckmail.sbs")}
+                {field("DuckMail Key", duck_api_key, "")}
+                {field("YesCaptcha Key", yescaptcha_key, "clientKey")}
+                {field("CaptchaRun Token", captcharun_token, "Bearer token")}
+                {field("组织名 (跳过手机验证)", org_name, "nvidia2api-org")}
+                {field("Key 过期日", key_expiry, "2028-01-01")}
+                div { class: "mb-2",
+                    label { class: "mb-1 block text-xs text-dim", "无头浏览器" }
+                    button {
+                        class: if headless() { "rounded border border-nvgreen px-3 py-1.5 text-sm text-nvgreen" } else { "rounded border border-line px-3 py-1.5 text-sm text-dim" },
+                        onclick: move |_| headless.set(!headless()),
+                        {if headless() { "headless ✓" } else { "headless ✗" }}
+                    }
+                }
+            }
+            button {
+                class: "mt-2 rounded bg-nvgreen px-4 py-1.5 text-sm font-bold text-black hover:opacity-90",
+                onclick: move |_| {
+                    let body = serde_json::json!({
+                        "email_provider": email_provider(), "cf_api_url": cf_api_url(), "cf_admin_auth": cf_admin_auth(),
+                        "cf_domain": cf_domain(), "duck_api_url": duck_api_url(), "duck_domain": duck_domain(),
+                        "duck_api_key": duck_api_key(), "captcha_mode": captcha_mode(), "yescaptcha_key": yescaptcha_key(),
+                        "captcharun_token": captcharun_token(), "headless": headless(), "org_name": org_name(),
+                        "key_expiry": key_expiry(),
+                    });
+                    spawn(async move {
+                        match api_send("POST", "/api/admin/register/config", Some(body)).await {
+                            Ok(_) => msg.set("配置已保存".into()),
+                            Err(e) => err.set(e),
+                        }
+                    });
+                },
+                "保存配置"
+            }
+            if !msg().is_empty() { span { class: "ml-3 text-xs text-alive", {msg()} } }
+            if !err().is_empty() { span { class: "ml-3 text-xs text-down", {err()} } }
         }
     }
 }

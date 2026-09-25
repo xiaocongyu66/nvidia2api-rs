@@ -12,6 +12,7 @@ mod models;
 mod nvidia;
 mod openai_api;
 mod proxy_pool;
+mod register;
 mod race;
 mod storage;
 mod user_keys;
@@ -57,7 +58,11 @@ async fn main() {
         .route("/models/{id}", put(admin_api::model_update).delete(admin_api::model_delete))
         .route("/api-keys", get(admin_api::api_keys).post(admin_api::api_keys_create))
         .route("/api-keys/{id}", put(admin_api::api_key_update).delete(admin_api::api_key_delete))
-        .route("/logs", get(admin_api::logs));
+        .route("/logs", get(admin_api::logs))
+        .route("/register/status", get(admin_api::register_status))
+        .route("/register/start", post(admin_api::register_start))
+        .route("/register/stop", post(admin_api::register_stop))
+        .route("/register/config", get(admin_api::register_config).post(admin_api::register_config_save));
 
     let app = Router::new()
         .route("/v1/models", get(openai_api::list_models))
