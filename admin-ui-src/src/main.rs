@@ -347,6 +347,8 @@ fn Keys() -> Element {
         }
     });
 
+    let items_snapshot: Vec<Value> = items();
+
     rsx! {
         PageHead { title: "NVIDIA Keys".to_string(), desc: "Key 池: 导入 nvapi- Key, 每账号独立 RPM / 冷却 / 竞速调度".to_string() }
         ErrBox { msg: err() }
@@ -474,6 +476,8 @@ fn Proxies() -> Element {
             Err(e) => err.set(e),
         }
     });
+
+    let items_snapshot: Vec<Value> = items();
 
     rsx! {
         PageHead { title: "代理池".to_string(), desc: "SOCKS5/HTTP/HTTPS · 启用上限 = Key数-1 · 每代理与直连竞速".to_string() }
@@ -624,6 +628,8 @@ fn Groups() -> Element {
         }
     });
 
+    let items_snapshot: Vec<Value> = items();
+
     rsx! {
         PageHead { title: "代理分组".to_string(), desc: "按分组管理代理国家/用途".to_string() }
         ErrBox { msg: err() }
@@ -710,6 +716,8 @@ fn Models() -> Element {
         }
     });
 
+    let items_snapshot: Vec<Value> = items();
+
     rsx! {
         PageHead { title: "模型".to_string(), desc: "从 NVIDIA 同步模型列表, 仅启用模型对外暴露".to_string() }
         ErrBox { msg: err() }
@@ -790,6 +798,8 @@ fn UKeys() -> Element {
             Err(e) => err.set(e),
         }
     });
+
+    let items_snapshot: Vec<Value> = items();
 
     rsx! {
         PageHead { title: "API Keys".to_string(), desc: "sk-nvidia2api-* · SHA-256 存储 · 每 Key 独立限流".to_string() }
@@ -892,6 +902,8 @@ fn Logs() -> Element {
             Err(e) => err.set(e),
         }
     });
+
+    let items_snapshot: Vec<Value> = items();
 
     rsx! {
         PageHead { title: "请求日志".to_string(), desc: "Winner 线路 / TTFT / Token 统计".to_string() }
