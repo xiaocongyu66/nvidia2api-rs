@@ -1223,3 +1223,7 @@ fn RegField(label: String, value: String, placeholder: String, oninput: EventHan
         }
     }
 }
+
+fn main() {
+    dioxus::launch(App);
+}
