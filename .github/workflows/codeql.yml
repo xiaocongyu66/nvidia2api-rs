@@ -1,0 +1,24 @@
+name: codeql
+
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "0 3 * * 1"
+
+jobs:
+  analyze:
+    name: analyze (rust)
+    runs-on: ubuntu-24.04
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          build-mode: autobuild
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"
