@@ -15,10 +15,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: github/codeql-action/init@v3
         with:
           languages: rust
-          build-mode: autobuild
+          build-mode: none
+      - name: Build (提取器被动捕获)
+        run: cargo build --release
       - uses: github/codeql-action/analyze@v3
         with:
           category: "/language:rust"
