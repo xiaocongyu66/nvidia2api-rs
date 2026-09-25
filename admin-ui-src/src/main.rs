@@ -290,7 +290,7 @@ fn Overview() -> Element {
                                 th { class: "py-1.5 pr-4 font-medium", "日期" } th { class: "py-1.5 pr-4 font-medium", "总量" }
                                 th { class: "py-1.5 pr-4 font-medium", "成功" } th { class: "py-1.5 font-medium", "平均延迟" }
                             } }
-                            tbody { let snapshot = items(); for day in u["days"].as_array().cloned().unwrap_or_default() {
+                            tbody { for day in u["days"].as_array().cloned().unwrap_or_default() {
                                 tr { class: "border-t border-line",
                                     td { class: "py-1.5 pr-4", {trim_text(&day, "date")} }
                                     td { class: "py-1.5 pr-4", {format!("{}", num_i64(&day, "total"))} }
@@ -388,7 +388,7 @@ fn Keys() -> Element {
                     th { class: "p-2.5 font-medium", "成功/失败" } th { class: "p-2.5 font-medium", "冷却至" }
                     th { class: "p-2.5 font-medium", "最后错误" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { let snapshot = items(); for k in snapshot.iter() {
+                tbody { for k in items_snapshot.iter() {
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-medium", {trim_text(k, "name")} }
                         td { class: "p-2.5 font-data text-xs text-dim", {trim_text(k, "masked_key")} }
@@ -535,7 +535,7 @@ fn Proxies() -> Element {
                     th { class: "p-2.5 font-medium", "公网 IP" } th { class: "p-2.5 font-medium", "位置" }
                     th { class: "p-2.5 font-medium", "成功/失败" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { let snapshot = items(); for p in snapshot.iter() {
+                tbody { for p in items_snapshot.iter() {
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-medium", {trim_text(p, "name")} }
                         td { class: "p-2.5 text-xs text-dim", {trim_text(p, "protocol")} }
@@ -660,7 +660,7 @@ fn Groups() -> Element {
                     th { class: "p-2.5 font-medium", "名称" } th { class: "p-2.5 font-medium", "国家" }
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { let snapshot = items(); for g in snapshot.iter() {
+                tbody { for g in items_snapshot.iter() {
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-medium", {trim_text(g, "name")} }
                         td { class: "p-2.5", {trim_text(g, "country")} }
@@ -740,7 +740,7 @@ fn Models() -> Element {
                     th { class: "p-2.5 font-medium", "模型" } th { class: "p-2.5 font-medium", "Provider" }
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { let snapshot = items(); for m in snapshot.iter() {
+                tbody { for m in items_snapshot.iter() {
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-data text-xs", {trim_text(m, "model_name")} }
                         td { class: "p-2.5 text-dim", {trim_text(m, "provider")} }
@@ -828,7 +828,7 @@ fn UKeys() -> Element {
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "总/成/败" }
                     th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { let snapshot = items(); for k in snapshot.iter() {
+                tbody { for k in items_snapshot.iter() {
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-medium", {trim_text(k, "name")} }
                         td { class: "p-2.5 font-data text-xs text-dim", {trim_text(k, "key_prefix")} }
@@ -912,7 +912,7 @@ fn Logs() -> Element {
                     th { class: "p-2.5 font-medium", "Key" } th { class: "p-2.5 font-medium", "Tokens" }
                     th { class: "p-2.5 font-medium", "错误" }
                 } }
-                tbody { let snapshot = items(); for l in snapshot.iter() {
+                tbody { for l in items_snapshot.iter() {
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 text-xs text-dim", {trim_text(l, "created_at")} }
                         td { class: "p-2.5 font-data text-xs", {trim_text(l, "model")} }
