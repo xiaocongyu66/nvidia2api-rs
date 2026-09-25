@@ -29,7 +29,8 @@ jobs:
       - name: build web (wasm release + tailwind)
         run: |
           cd admin-ui-src
-          npx --yes @tailwindcss/cli@4 -i assets/tailwind.css -o assets/tailwind.out.css
+          npm install --no-audit --no-fund
+          npx @tailwindcss/cli -i assets/tailwind.css -o assets/tailwind.out.css
           dx build --platform web --release
       - name: embed web into binary
         run: |
