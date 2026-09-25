@@ -391,61 +391,7 @@ fn Keys() -> Element {
                     th { class: "p-2.5 font-medium", "最后错误" } th { class: "p-2.5 font-medium", "操作" }
                 } }
                 tbody { for k in items_snapshot.into_iter() {
-                    let id = num_i64(&k, "id");
-                    let is_disabled = trim_text(&k, "status") == "disabled";
-                    tr { class: "border-t border-line",
-                        td { class: "p-2.5 font-medium", {trim_text(&k, "name")} }
-                        td { class: "p-2.5 font-data text-xs text-dim", {trim_text(&k, "masked_key")} }
-                        td { class: "p-2.5", Tag { status: trim_text(&k, "status") } }
-                        td { class: "p-2.5", {format!("{}", num_i64(&k, "rpm_limit"))} }
-                        td { class: "p-2.5", {format!("{}/{}", num_i64(&k, "success_count"), num_i64(&k, "failure_count"))} }
-                        td { class: "p-2.5 text-xs text-dim", {trim_text(&k, "cooldown_until")} }
-                        td { class: "p-2.5 text-xs text-down", {trim_text(&k, "last_error")} }
-                        td { class: "p-2.5",
-                            div { class: "flex gap-1.5",
-                                button {
-                                    class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
-                                    onclick: move |_| {
-                                        spawn(async move {
-                                            match api_send("POST", &format!("/api/admin/nvidia-keys/{id}/test"), None).await {
-                                                Ok(v) => {
-                                                    msg.set(if v["ok"].as_bool().unwrap_or(false) { format!("Key {id} 探活通过") } else { format!("Key {id} 探活失败: {}", v["http_status"]) });
-                                                    tick.set(tick() + 1);
-                                                }
-                                                Err(e) => err.set(e),
-                                            }
-                                        });
-                                    },
-                                    "测活"
-                                }
-                                button {
-                                    class: "rounded border border-line px-2 py-1 text-xs hover:text-hold",
-                                    onclick: move |_| {
-                                        let st = if is_disabled { "available" } else { "disabled" };
-                                        spawn(async move {
-                                            match api_send("PUT", &format!("/api/admin/nvidia-keys/{id}"), Some(serde_json::json!({"status": st}))).await {
-                                                Ok(_) => tick.set(tick() + 1),
-                                                Err(e) => err.set(e),
-                                            }
-                                        });
-                                    },
-                                    {if is_disabled { "启用" } else { "禁用" }}
-                                }
-                                button {
-                                    class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
-                                    onclick: move |_| {
-                                        spawn(async move {
-                                            match api_send("DELETE", &format!("/api/admin/nvidia-keys/{id}"), None).await {
-                                                Ok(_) => tick.set(tick() + 1),
-                                                Err(e) => err.set(e),
-                                            }
-                                        });
-                                    },
-                                    "删除"
-                                }
-                            }
-                        }
-                    }
+                    KeyRow { k: k, err: err, msg: msg, tick: tick }
                 } }
             }
         }
@@ -539,67 +485,7 @@ fn Proxies() -> Element {
                     th { class: "p-2.5 font-medium", "成功/失败" } th { class: "p-2.5 font-medium", "操作" }
                 } }
                 tbody { for p in items_snapshot.into_iter() {
-                    let id = num_i64(&p, "id");
-                    let enabled = p["enabled"].as_bool().unwrap_or(false);
-                    tr { class: "border-t border-line",
-                        td { class: "p-2.5 font-medium", {trim_text(&p, "name")} }
-                        td { class: "p-2.5 text-xs text-dim", {trim_text(&p, "protocol")} }
-                        td { class: "p-2.5",
-                            div { class: "flex items-center gap-2",
-                                Tag { status: trim_text(&p, "status") }
-                                if p["enabled"].as_bool().unwrap_or(false) { Tag { status: "enabled".to_string() } }
-                            }
-                        }
-                        td { class: "p-2.5", {match p["latency_ms"].as_f64() { Some(l) => format!("{l:.0}ms"), None => "-".into() }} }
-                        td { class: "p-2.5 text-xs", {trim_text(&p, "public_ip")} }
-                        td { class: "p-2.5 text-xs text-dim", {format!("{} {}", trim_text(&p, "country"), trim_text(&p, "city"))} }
-                        td { class: "p-2.5", {format!("{}/{}", num_i64(&p, "success_count"), num_i64(&p, "failure_count"))} }
-                        td { class: "p-2.5",
-                            div { class: "flex gap-1.5",
-                                button {
-                                    class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
-                                    onclick: move |_| {
-                                        let enable = !enabled;
-                                        spawn(async move {
-                                            match api_send("PUT", &format!("/api/admin/proxies/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
-                                                Ok(_) => { msg.set(String::new()); tick.set(tick() + 1); }
-                                                Err(e) => err.set(e),
-                                            }
-                                        });
-                                    },
-                                    {if enabled { "停用" } else { "启用" }}
-                                }
-                                button {
-                                    class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
-                                    onclick: move |_| {
-                                        spawn(async move {
-                                            match api_send("POST", &format!("/api/admin/proxies/{id}/fetch-ip"), None).await {
-                                                Ok(v) => {
-                                                    if v["ok"].as_bool().unwrap_or(false) { msg.set(format!("IP: {} ({:.0}ms)", trim_text(&v, "public_ip"), num_f64(&v, "latency_ms"))); }
-                                                    else { msg.set(format!("失败: {}", trim_text(&v, "error"))); }
-                                                    tick.set(tick() + 1);
-                                                }
-                                                Err(e) => err.set(e),
-                                            }
-                                        });
-                                    },
-                                    "查IP"
-                                }
-                                button {
-                                    class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
-                                    onclick: move |_| {
-                                        spawn(async move {
-                                            match api_send("DELETE", &format!("/api/admin/proxies/{id}"), None).await {
-                                                Ok(_) => tick.set(tick() + 1),
-                                                Err(e) => err.set(e),
-                                            }
-                                        });
-                                    },
-                                    "删除"
-                                }
-                            }
-                        }
-                    }
+                    ProxyRow { p: p, err: err, msg: msg, tick: tick }
                 } }
             }
         }
@@ -665,26 +551,7 @@ fn Groups() -> Element {
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "操作" }
                 } }
                 tbody { for g in items_snapshot.into_iter() {
-                    let id = num_i64(&g, "id");
-                    tr { class: "border-t border-line",
-                        td { class: "p-2.5 font-medium", {trim_text(&g, "name")} }
-                        td { class: "p-2.5", {trim_text(&g, "country")} }
-                        td { class: "p-2.5", Tag { status: if g["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
-                        td { class: "p-2.5",
-                            button {
-                                class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
-                                onclick: move |_| {
-                                    spawn(async move {
-                                        match api_send("DELETE", &format!("/api/admin/proxy-groups/{id}"), None).await {
-                                            Ok(_) => tick.set(tick() + 1),
-                                            Err(e) => err.set(e),
-                                        }
-                                    });
-                                },
-                                "删除"
-                            }
-                        }
-                    }
+                    GroupRow { g: g, err: err, tick: tick }
                 } }
             }
         }
@@ -747,28 +614,7 @@ fn Models() -> Element {
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "操作" }
                 } }
                 tbody { for m in items_snapshot.into_iter() {
-                    let id = num_i64(&m, "id");
-                    let enabled = m["enabled"].as_bool().unwrap_or(false);
-                    tr { class: "border-t border-line",
-                        td { class: "p-2.5 font-data text-xs", {trim_text(&m, "model_name")} }
-                        td { class: "p-2.5 text-dim", {trim_text(&m, "provider")} }
-                        td { class: "p-2.5", Tag { status: if m["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
-                        td { class: "p-2.5",
-                            button {
-                                class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
-                                onclick: move |_| {
-                                    let enable = !enabled;
-                                    spawn(async move {
-                                        match api_send("PUT", &format!("/api/admin/models/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
-                                            Ok(_) => tick.set(tick() + 1),
-                                            Err(e) => err.set(e),
-                                        }
-                                    });
-                                },
-                                {if enabled { "停用" } else { "启用" }}
-                            }
-                        }
-                    }
+                    ModelRow { m: m, err: err, tick: tick }
                 } }
             }
         }
@@ -838,43 +684,7 @@ fn UKeys() -> Element {
                     th { class: "p-2.5 font-medium", "操作" }
                 } }
                 tbody { for k in items_snapshot.into_iter() {
-                    let id = num_i64(&k, "id");
-                    let is_disabled = trim_text(&k, "status") == "disabled";
-                    tr { class: "border-t border-line",
-                        td { class: "p-2.5 font-medium", {trim_text(&k, "name")} }
-                        td { class: "p-2.5 font-data text-xs text-dim", {trim_text(&k, "key_prefix")} }
-                        td { class: "p-2.5", Tag { status: if k["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
-                        td { class: "p-2.5", {format!("{}/{}/{}", num_i64(&k, "total_requests"), num_i64(&k, "success_requests"), num_i64(&k, "failed_requests"))} }
-                        td { class: "p-2.5",
-                            div { class: "flex gap-1.5",
-                                button {
-                                    class: "rounded border border-line px-2 py-1 text-xs hover:text-hold",
-                                    onclick: move |_| {
-                                        let enable = !enabled;
-                                        spawn(async move {
-                                            match api_send("PUT", &format!("/api/admin/api-keys/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
-                                                Ok(_) => tick.set(tick() + 1),
-                                                Err(e) => err.set(e),
-                                            }
-                                        });
-                                    },
-                                    {if k["enabled"].as_bool().unwrap_or(false) { "停用" } else { "启用" }}
-                                }
-                                button {
-                                    class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
-                                    onclick: move |_| {
-                                        spawn(async move {
-                                            match api_send("DELETE", &format!("/api/admin/api-keys/{id}"), None).await {
-                                                Ok(_) => tick.set(tick() + 1),
-                                                Err(e) => err.set(e),
-                                            }
-                                        });
-                                    },
-                                    "删除"
-                                }
-                            }
-                        }
-                    }
+                    UKeysRow { k: k, err: err, tick: tick }
                 } }
             }
         }
@@ -924,20 +734,7 @@ fn Logs() -> Element {
                     th { class: "p-2.5 font-medium", "错误" }
                 } }
                 tbody { for l in items_snapshot.into_iter() {
-                    tr { class: "border-t border-line",
-                        td { class: "p-2.5 text-xs text-dim", {trim_text(&l, "created_at")} }
-                        td { class: "p-2.5 font-data text-xs", {trim_text(&l, "model")} }
-                        td { class: "p-2.5", Tag { status: trim_text(&l, "status") } }
-                        td { class: "p-2.5", {format!("{:.0}ms", num_f64(&l, "duration_ms"))} }
-                        td { class: "p-2.5", {match l["first_token_ms"].as_f64() { Some(t) => format!("{t:.0}ms"), None => "-".into() }} }
-                        td { class: "p-2.5 text-xs",
-                            span { class: "text-dim", {trim_text(&l, "winner_route_type")} " · " }
-                            span { {trim_text(&l, "winner_proxy_name")} }
-                        }
-                        td { class: "p-2.5 text-xs", {trim_text(&l, "winner_key_name")} }
-                        td { class: "p-2.5 text-xs text-dim", {format!("{}", num_i64(&l, "total_tokens"))} }
-                        td { class: "p-2.5 text-xs text-down", {format!("{} {}", trim_text(&l, "error_type"), num_i64(&l, "http_status"))} }
-                    }
+                    LogRow { l: l }
                 } }
             }
         }
@@ -1231,6 +1028,251 @@ fn RegField(label: String, value: String, placeholder: String, oninput: EventHan
                 oninput: move |e| oninput.call(e.value()),
                 placeholder: placeholder,
             }
+        }
+    }
+}
+
+#[component]
+fn KeyRow(k: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick: Signal<u64>) -> Element {
+    let id = num_i64(&k, "id");
+    let is_disabled = trim_text(&k, "status") == "disabled";
+    rsx! {
+        tr { class: "border-t border-line",
+            td { class: "p-2.5 font-medium", {trim_text(&k, "name")} }
+            td { class: "p-2.5 font-data text-xs text-dim", {trim_text(&k, "masked_key")} }
+            td { class: "p-2.5", Tag { status: trim_text(&k, "status") } }
+            td { class: "p-2.5", {format!("{}", num_i64(&k, "rpm_limit"))} }
+            td { class: "p-2.5", {format!("{}/{}", num_i64(&k, "success_count"), num_i64(&k, "failure_count"))} }
+            td { class: "p-2.5 text-xs text-dim", {trim_text(&k, "cooldown_until")} }
+            td { class: "p-2.5 text-xs text-down", {trim_text(&k, "last_error")} }
+            td { class: "p-2.5",
+                div { class: "flex gap-1.5",
+                    button {
+                        class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
+                        onclick: move |_| {
+                            spawn(async move {
+                                match api_send("POST", &format!("/api/admin/nvidia-keys/{id}/test"), None).await {
+                                    Ok(v) => {
+                                        msg.set(if v["ok"].as_bool().unwrap_or(false) { format!("Key {id} 探活通过") } else { format!("Key {id} 探活失败: {}", v["http_status"]) });
+                                        tick.set(tick() + 1);
+                                    }
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        "测活"
+                    }
+                    button {
+                        class: "rounded border border-line px-2 py-1 text-xs hover:text-hold",
+                        onclick: move |_| {
+                            let st = if is_disabled { "available" } else { "disabled" };
+                            spawn(async move {
+                                match api_send("PUT", &format!("/api/admin/nvidia-keys/{id}"), Some(serde_json::json!({"status": st}))).await {
+                                    Ok(_) => tick.set(tick() + 1),
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        {if is_disabled { "启用" } else { "禁用" }}
+                    }
+                    button {
+                        class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
+                        onclick: move |_| {
+                            spawn(async move {
+                                match api_send("DELETE", &format!("/api/admin/nvidia-keys/{id}"), None).await {
+                                    Ok(_) => tick.set(tick() + 1),
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        "删除"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ProxyRow(p: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick: Signal<u64>) -> Element {
+    let id = num_i64(&p, "id");
+    let enabled = p["enabled"].as_bool().unwrap_or(false);
+    rsx! {
+        tr { class: "border-t border-line",
+            td { class: "p-2.5 font-medium", {trim_text(&p, "name")} }
+            td { class: "p-2.5 text-xs text-dim", {trim_text(&p, "protocol")} }
+            td { class: "p-2.5",
+                div { class: "flex items-center gap-2",
+                    Tag { status: trim_text(&p, "status") }
+                    if enabled { Tag { status: "enabled".to_string() } }
+                }
+            }
+            td { class: "p-2.5", {match p["latency_ms"].as_f64() { Some(l) => format!("{l:.0}ms"), None => "-".into() }} }
+            td { class: "p-2.5 text-xs", {trim_text(&p, "public_ip")} }
+            td { class: "p-2.5 text-xs text-dim", {format!("{} {}", trim_text(&p, "country"), trim_text(&p, "city"))} }
+            td { class: "p-2.5", {format!("{}/{}", num_i64(&p, "success_count"), num_i64(&p, "failure_count"))} }
+            td { class: "p-2.5",
+                div { class: "flex gap-1.5",
+                    button {
+                        class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
+                        onclick: move |_| {
+                            let enable = !enabled;
+                            spawn(async move {
+                                match api_send("PUT", &format!("/api/admin/proxies/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
+                                    Ok(_) => { msg.set(String::new()); tick.set(tick() + 1); }
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        {if enabled { "停用" } else { "启用" }}
+                    }
+                    button {
+                        class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
+                        onclick: move |_| {
+                            spawn(async move {
+                                match api_send("POST", &format!("/api/admin/proxies/{id}/fetch-ip"), None).await {
+                                    Ok(v) => {
+                                        if v["ok"].as_bool().unwrap_or(false) { msg.set(format!("IP: {} ({:.0}ms)", trim_text(&v, "public_ip"), num_f64(&v, "latency_ms"))); }
+                                        else { msg.set(format!("失败: {}", trim_text(&v, "error"))); }
+                                        tick.set(tick() + 1);
+                                    }
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        "查IP"
+                    }
+                    button {
+                        class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
+                        onclick: move |_| {
+                            spawn(async move {
+                                match api_send("DELETE", &format!("/api/admin/proxies/{id}"), None).await {
+                                    Ok(_) => tick.set(tick() + 1),
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        "删除"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn GroupRow(g: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element {
+    let id = num_i64(&g, "id");
+    rsx! {
+        tr { class: "border-t border-line",
+            td { class: "p-2.5 font-medium", {trim_text(&g, "name")} }
+            td { class: "p-2.5", {trim_text(&g, "country")} }
+            td { class: "p-2.5", Tag { status: if g["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
+            td { class: "p-2.5",
+                button {
+                    class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
+                    onclick: move |_| {
+                        spawn(async move {
+                            match api_send("DELETE", &format!("/api/admin/proxy-groups/{id}"), None).await {
+                                Ok(_) => tick.set(tick() + 1),
+                                Err(e) => err.set(e),
+                            }
+                        });
+                    },
+                    "删除"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ModelRow(m: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element {
+    let id = num_i64(&m, "id");
+    let enabled = m["enabled"].as_bool().unwrap_or(false);
+    rsx! {
+        tr { class: "border-t border-line",
+            td { class: "p-2.5 font-data text-xs", {trim_text(&m, "model_name")} }
+            td { class: "p-2.5 text-dim", {trim_text(&m, "provider")} }
+            td { class: "p-2.5", Tag { status: if enabled { "enabled".to_string() } else { "disabled".to_string() } } }
+            td { class: "p-2.5",
+                button {
+                    class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
+                    onclick: move |_| {
+                        let enable = !enabled;
+                        spawn(async move {
+                            match api_send("PUT", &format!("/api/admin/models/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
+                                Ok(_) => tick.set(tick() + 1),
+                                Err(e) => err.set(e),
+                            }
+                        });
+                    },
+                    {if enabled { "停用" } else { "启用" }}
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn UKeysRow(k: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element {
+    let id = num_i64(&k, "id");
+    let enabled = k["enabled"].as_bool().unwrap_or(false);
+    rsx! {
+        tr { class: "border-t border-line",
+            td { class: "p-2.5 font-medium", {trim_text(&k, "name")} }
+            td { class: "p-2.5 font-data text-xs text-dim", {trim_text(&k, "key_prefix")} }
+            td { class: "p-2.5", Tag { status: if enabled { "enabled".to_string() } else { "disabled".to_string() } } }
+            td { class: "p-2.5", {format!("{}/{}/{}", num_i64(&k, "total_requests"), num_i64(&k, "success_requests"), num_i64(&k, "failed_requests"))} }
+            td { class: "p-2.5",
+                div { class: "flex gap-1.5",
+                    button {
+                        class: "rounded border border-line px-2 py-1 text-xs hover:text-hold",
+                        onclick: move |_| {
+                            let enable = !enabled;
+                            spawn(async move {
+                                match api_send("PUT", &format!("/api/admin/api-keys/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
+                                    Ok(_) => tick.set(tick() + 1),
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        {if enabled { "停用" } else { "启用" }}
+                    }
+                    button {
+                        class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
+                        onclick: move |_| {
+                            spawn(async move {
+                                match api_send("DELETE", &format!("/api/admin/api-keys/{id}"), None).await {
+                                    Ok(_) => tick.set(tick() + 1),
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        "删除"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn LogRow(l: Value) -> Element {
+    rsx! {
+        tr { class: "border-t border-line",
+            td { class: "p-2.5 text-xs text-dim", {trim_text(&l, "created_at")} }
+            td { class: "p-2.5 font-data text-xs", {trim_text(&l, "model")} }
+            td { class: "p-2.5", Tag { status: trim_text(&l, "status") } }
+            td { class: "p-2.5", {format!("{:.0}ms", num_f64(&l, "duration_ms"))} }
+            td { class: "p-2.5", {match l["first_token_ms"].as_f64() { Some(t) => format!("{t:.0}ms"), None => "-".into() }} }
+            td { class: "p-2.5 text-xs",
+                span { class: "text-dim", {trim_text(&l, "winner_route_type")} " · " }
+                span { {trim_text(&l, "winner_proxy_name")} }
+            }
+            td { class: "p-2.5 text-xs", {trim_text(&l, "winner_key_name")} }
+            td { class: "p-2.5 text-xs text-dim", {format!("{}", num_i64(&l, "total_tokens"))} }
+            td { class: "p-2.5 text-xs text-down", {format!("{} {}", trim_text(&l, "error_type"), num_i64(&l, "http_status"))} }
         }
     }
 }
