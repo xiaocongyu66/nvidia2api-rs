@@ -161,14 +161,14 @@ fn ConsoleLayout() -> Element {
             div { class: "min-h-screen bg-shell text-ink",
                 nav { class: "sticky top-0 z-30 flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-line bg-panel px-5 py-2.5",
                     span { class: "font-bold text-nvgreen", "⚡ nvidia2api-rs" }
-                    NavLink { to: Route::Overview {}, label: "概览" }
-                    NavLink { to: Route::Keys {}, label: "NVIDIA Keys" }
-                    NavLink { to: Route::Proxies {}, label: "代理" }
-                    NavLink { to: Route::Groups {}, label: "分组" }
-                    NavLink { to: Route::Models {}, label: "模型" }
-                    NavLink { to: Route::UKeys {}, label: "API Keys" }
-                    NavLink { to: Route::Logs {}, label: "日志" }
-                    NavLink { to: Route::Settings {}, label: "设置" }
+                    NavLink { to: Route::Overview {}, label: "概览".to_string() }
+                    NavLink { to: Route::Keys {}, label: "NVIDIA Keys".to_string() }
+                    NavLink { to: Route::Proxies {}, label: "代理".to_string() }
+                    NavLink { to: Route::Groups {}, label: "分组".to_string() }
+                    NavLink { to: Route::Models {}, label: "模型".to_string() }
+                    NavLink { to: Route::UKeys {}, label: "API Keys".to_string() }
+                    NavLink { to: Route::Logs {}, label: "日志".to_string() }
+                    NavLink { to: Route::Settings {}, label: "设置".to_string() }
                     span { class: "ml-auto text-xs text-dim",
                         button {
                             class: "rounded border border-line px-2 py-1 text-xs text-dim hover:text-ink",
@@ -260,7 +260,7 @@ fn Overview() -> Element {
     });
 
     rsx! {
-        PageHead { title: "概览".into(), desc: "Key 池 / 代理 / 模型 / 请求量实时状态".into() }
+        PageHead { title: "概览".to_string(), desc: "Key 池 / 代理 / 模型 / 请求量实时状态".to_string() }
         ErrBox { msg: err() }
         match data() {
             Some(v) => rsx! {
@@ -345,7 +345,7 @@ fn Keys() -> Element {
     });
 
     rsx! {
-        PageHead { title: "NVIDIA Keys".into(), desc: "Key 池: 导入 nvapi- Key, 每账号独立 RPM / 冷却 / 竞速调度".into() }
+        PageHead { title: "NVIDIA Keys".to_string(), desc: "Key 池: 导入 nvapi- Key, 每账号独立 RPM / 冷却 / 竞速调度".to_string() }
         ErrBox { msg: err() }
         if !msg().is_empty() { div { class: "mb-3 border-l-[3px] border-nvgreen bg-nvgreen/10 px-4 py-2 text-sm text-alive", {msg()} } }
 
@@ -473,7 +473,7 @@ fn Proxies() -> Element {
     });
 
     rsx! {
-        PageHead { title: "代理池".into(), desc: "SOCKS5/HTTP/HTTPS · 启用上限 = Key数-1 · 每代理与直连竞速".into() }
+        PageHead { title: "代理池".to_string(), desc: "SOCKS5/HTTP/HTTPS · 启用上限 = Key数-1 · 每代理与直连竞速".to_string() }
         ErrBox { msg: err() }
         if !msg().is_empty() { div { class: "mb-3 border-l-[3px] border-nvgreen bg-nvgreen/10 px-4 py-2 text-sm text-alive", {msg()} } }
 
@@ -539,7 +539,7 @@ fn Proxies() -> Element {
                         td { class: "p-2.5",
                             div { class: "flex items-center gap-2",
                                 Tag { status: trim_text(&p, "status") }
-                                if p["enabled"].as_bool().unwrap_or(false) { Tag { status: "enabled".into() } }
+                                if p["enabled"].as_bool().unwrap_or(false) { Tag { status: "enabled".to_string() } }
                             }
                         }
                         td { class: "p-2.5", {match p["latency_ms"].as_f64() { Some(l) => format!("{l:.0}ms"), None => "-".into() }} }
@@ -622,7 +622,7 @@ fn Groups() -> Element {
     });
 
     rsx! {
-        PageHead { title: "代理分组".into(), desc: "按分组管理代理国家/用途".into() }
+        PageHead { title: "代理分组".to_string(), desc: "按分组管理代理国家/用途".to_string() }
         ErrBox { msg: err() }
         div { class: "mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel p-4",
             input {
@@ -661,7 +661,7 @@ fn Groups() -> Element {
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-medium", {trim_text(&g, "name")} }
                         td { class: "p-2.5", {trim_text(&g, "country")} }
-                        td { class: "p-2.5", Tag { status: if g["enabled"].as_bool().unwrap_or(false) { "enabled".into() } else { "disabled".into() } } }
+                        td { class: "p-2.5", Tag { status: if g["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
                         td { class: "p-2.5",
                             button {
                                 class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
@@ -708,7 +708,7 @@ fn Models() -> Element {
     });
 
     rsx! {
-        PageHead { title: "模型".into(), desc: "从 NVIDIA 同步模型列表, 仅启用模型对外暴露".into() }
+        PageHead { title: "模型".to_string(), desc: "从 NVIDIA 同步模型列表, 仅启用模型对外暴露".to_string() }
         ErrBox { msg: err() }
         if !msg().is_empty() { div { class: "mb-3 border-l-[3px] border-nvgreen bg-nvgreen/10 px-4 py-2 text-sm text-alive", {msg()} } }
         div { class: "mb-3",
@@ -741,7 +741,7 @@ fn Models() -> Element {
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-data text-xs", {trim_text(&m, "model_name")} }
                         td { class: "p-2.5 text-dim", {trim_text(&m, "provider")} }
-                        td { class: "p-2.5", Tag { status: if m["enabled"].as_bool().unwrap_or(false) { "enabled".into() } else { "disabled".into() } } }
+                        td { class: "p-2.5", Tag { status: if m["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
                         td { class: "p-2.5",
                             button {
                                 class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
@@ -789,7 +789,7 @@ fn UKeys() -> Element {
     });
 
     rsx! {
-        PageHead { title: "API Keys".into(), desc: "sk-nvidia2api-* · SHA-256 存储 · 每 Key 独立限流".into() }
+        PageHead { title: "API Keys".to_string(), desc: "sk-nvidia2api-* · SHA-256 存储 · 每 Key 独立限流".to_string() }
         ErrBox { msg: err() }
         if !raw_new().is_empty() {
             div { class: "mb-3 rounded-lg border border-nvgreen bg-nvgreen/10 p-4",
@@ -829,7 +829,7 @@ fn UKeys() -> Element {
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-medium", {trim_text(&k, "name")} }
                         td { class: "p-2.5 font-data text-xs text-dim", {trim_text(&k, "key_prefix")} }
-                        td { class: "p-2.5", Tag { status: if k["enabled"].as_bool().unwrap_or(false) { "enabled".into() } else { "disabled".into() } } }
+                        td { class: "p-2.5", Tag { status: if k["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
                         td { class: "p-2.5", {format!("{}/{}/{}", num_i64(&k, "total_requests"), num_i64(&k, "success_requests"), num_i64(&k, "failed_requests"))} }
                         td { class: "p-2.5",
                             div { class: "flex gap-1.5",
@@ -891,7 +891,7 @@ fn Logs() -> Element {
     });
 
     rsx! {
-        PageHead { title: "请求日志".into(), desc: "Winner 线路 / TTFT / Token 统计".into() }
+        PageHead { title: "请求日志".to_string(), desc: "Winner 线路 / TTFT / Token 统计".to_string() }
         ErrBox { msg: err() }
         div { class: "mb-3",
             button {
@@ -954,7 +954,7 @@ fn Settings() -> Element {
     });
 
     rsx! {
-        PageHead { title: "运行时设置".into(), desc: "system_setting 表 · 运行时读取热生效".into() }
+        PageHead { title: "运行时设置".to_string(), desc: "system_setting 表 · 运行时读取热生效".to_string() }
         ErrBox { msg: err() }
         if !msg().is_empty() { div { class: "mb-3 border-l-[3px] border-nvgreen bg-nvgreen/10 px-4 py-2 text-sm text-alive", {msg()} } }
         div { class: "rounded-lg border border-line bg-panel p-4",
@@ -992,4 +992,8 @@ fn Settings() -> Element {
             None => rsx! {},
         }
     }
+}
+
+fn main() {
+    dioxus::launch(App);
 }
