@@ -390,7 +390,9 @@ fn Keys() -> Element {
                     th { class: "p-2.5 font-medium", "成功/失败" } th { class: "p-2.5 font-medium", "冷却至" }
                     th { class: "p-2.5 font-medium", "最后错误" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { for k in items_snapshot.iter() {
+                tbody { for k in items_snapshot.into_iter() {
+                    let id = num_i64(k, "id");
+                    let is_disabled = trim_text(k, "status") == "disabled";
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-medium", {trim_text(k, "name")} }
                         td { class: "p-2.5 font-data text-xs text-dim", {trim_text(k, "masked_key")} }
@@ -404,7 +406,6 @@ fn Keys() -> Element {
                                 button {
                                     class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
                                     onclick: move |_| {
-                                        let id = num_i64(k, "id");
                                         spawn(async move {
                                             match api_send("POST", &format!("/api/admin/nvidia-keys/{id}/test"), None).await {
                                                 Ok(v) => {
@@ -420,8 +421,7 @@ fn Keys() -> Element {
                                 button {
                                     class: "rounded border border-line px-2 py-1 text-xs hover:text-hold",
                                     onclick: move |_| {
-                                        let id = num_i64(k, "id");
-                                        let st = if trim_text(k, "status") == "disabled" { "available" } else { "disabled" };
+                                        let st = if is_disabled { "available" } else { "disabled" };
                                         spawn(async move {
                                             match api_send("PUT", &format!("/api/admin/nvidia-keys/{id}"), Some(serde_json::json!({"status": st}))).await {
                                                 Ok(_) => tick.set(tick() + 1),
@@ -429,12 +429,11 @@ fn Keys() -> Element {
                                             }
                                         });
                                     },
-                                    {if trim_text(k, "status") == "disabled" { "启用" } else { "禁用" }}
+                                    {if is_disabled { "启用" } else { "禁用" }}
                                 }
                                 button {
                                     class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
                                     onclick: move |_| {
-                                        let id = num_i64(k, "id");
                                         spawn(async move {
                                             match api_send("DELETE", &format!("/api/admin/nvidia-keys/{id}"), None).await {
                                                 Ok(_) => tick.set(tick() + 1),
@@ -539,7 +538,9 @@ fn Proxies() -> Element {
                     th { class: "p-2.5 font-medium", "公网 IP" } th { class: "p-2.5 font-medium", "位置" }
                     th { class: "p-2.5 font-medium", "成功/失败" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { for p in items_snapshot.iter() {
+                tbody { for p in items_snapshot.into_iter() {
+                    let id = num_i64(p, "id");
+                    let enabled = p["enabled"].as_bool().unwrap_or(false);
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-medium", {trim_text(p, "name")} }
                         td { class: "p-2.5 text-xs text-dim", {trim_text(p, "protocol")} }
@@ -558,8 +559,7 @@ fn Proxies() -> Element {
                                 button {
                                     class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
                                     onclick: move |_| {
-                                        let id = num_i64(p, "id");
-                                        let enable = !p["enabled"].as_bool().unwrap_or(false);
+                                        let enable = !enabled;
                                         spawn(async move {
                                             match api_send("PUT", &format!("/api/admin/proxies/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
                                                 Ok(_) => { msg.set(String::new()); tick.set(tick() + 1); }
@@ -567,12 +567,11 @@ fn Proxies() -> Element {
                                             }
                                         });
                                     },
-                                    {if p["enabled"].as_bool().unwrap_or(false) { "停用" } else { "启用" }}
+                                    {if enabled { "停用" } else { "启用" }}
                                 }
                                 button {
                                     class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
                                     onclick: move |_| {
-                                        let id = num_i64(p, "id");
                                         spawn(async move {
                                             match api_send("POST", &format!("/api/admin/proxies/{id}/fetch-ip"), None).await {
                                                 Ok(v) => {
@@ -589,7 +588,6 @@ fn Proxies() -> Element {
                                 button {
                                     class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
                                     onclick: move |_| {
-                                        let id = num_i64(p, "id");
                                         spawn(async move {
                                             match api_send("DELETE", &format!("/api/admin/proxies/{id}"), None).await {
                                                 Ok(_) => tick.set(tick() + 1),
@@ -666,7 +664,8 @@ fn Groups() -> Element {
                     th { class: "p-2.5 font-medium", "名称" } th { class: "p-2.5 font-medium", "国家" }
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { for g in items_snapshot.iter() {
+                tbody { for g in items_snapshot.into_iter() {
+                    let id = num_i64(g, "id");
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-medium", {trim_text(g, "name")} }
                         td { class: "p-2.5", {trim_text(g, "country")} }
@@ -675,7 +674,6 @@ fn Groups() -> Element {
                             button {
                                 class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
                                 onclick: move |_| {
-                                    let id = num_i64(g, "id");
                                     spawn(async move {
                                         match api_send("DELETE", &format!("/api/admin/proxy-groups/{id}"), None).await {
                                             Ok(_) => tick.set(tick() + 1),
@@ -748,7 +746,9 @@ fn Models() -> Element {
                     th { class: "p-2.5 font-medium", "模型" } th { class: "p-2.5 font-medium", "Provider" }
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { for m in items_snapshot.iter() {
+                tbody { for m in items_snapshot.into_iter() {
+                    let id = num_i64(m, "id");
+                    let enabled = m["enabled"].as_bool().unwrap_or(false);
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-data text-xs", {trim_text(m, "model_name")} }
                         td { class: "p-2.5 text-dim", {trim_text(m, "provider")} }
@@ -757,8 +757,7 @@ fn Models() -> Element {
                             button {
                                 class: "rounded border border-line px-2 py-1 text-xs hover:text-nvgreen",
                                 onclick: move |_| {
-                                    let id = num_i64(m, "id");
-                                    let enable = !m["enabled"].as_bool().unwrap_or(false);
+                                    let enable = !enabled;
                                     spawn(async move {
                                         match api_send("PUT", &format!("/api/admin/models/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
                                             Ok(_) => tick.set(tick() + 1),
@@ -766,7 +765,7 @@ fn Models() -> Element {
                                         }
                                     });
                                 },
-                                {if m["enabled"].as_bool().unwrap_or(false) { "停用" } else { "启用" }}
+                                {if enabled { "停用" } else { "启用" }}
                             }
                         }
                     }
@@ -838,7 +837,9 @@ fn UKeys() -> Element {
                     th { class: "p-2.5 font-medium", "状态" } th { class: "p-2.5 font-medium", "总/成/败" }
                     th { class: "p-2.5 font-medium", "操作" }
                 } }
-                tbody { for k in items_snapshot.iter() {
+                tbody { for k in items_snapshot.into_iter() {
+                    let id = num_i64(k, "id");
+                    let is_disabled = trim_text(k, "status") == "disabled";
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 font-medium", {trim_text(k, "name")} }
                         td { class: "p-2.5 font-data text-xs text-dim", {trim_text(k, "key_prefix")} }
@@ -849,8 +850,7 @@ fn UKeys() -> Element {
                                 button {
                                     class: "rounded border border-line px-2 py-1 text-xs hover:text-hold",
                                     onclick: move |_| {
-                                        let id = num_i64(k, "id");
-                                        let enable = !k["enabled"].as_bool().unwrap_or(false);
+                                        let enable = !enabled;
                                         spawn(async move {
                                             match api_send("PUT", &format!("/api/admin/api-keys/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
                                                 Ok(_) => tick.set(tick() + 1),
@@ -863,7 +863,6 @@ fn UKeys() -> Element {
                                 button {
                                     class: "rounded border border-down/40 px-2 py-1 text-xs text-down hover:bg-down/10",
                                     onclick: move |_| {
-                                        let id = num_i64(k, "id");
                                         spawn(async move {
                                             match api_send("DELETE", &format!("/api/admin/api-keys/{id}"), None).await {
                                                 Ok(_) => tick.set(tick() + 1),
@@ -924,7 +923,7 @@ fn Logs() -> Element {
                     th { class: "p-2.5 font-medium", "Key" } th { class: "p-2.5 font-medium", "Tokens" }
                     th { class: "p-2.5 font-medium", "错误" }
                 } }
-                tbody { for l in items_snapshot.iter() {
+                tbody { for l in items_snapshot.into_iter() {
                     tr { class: "border-t border-line",
                         td { class: "p-2.5 text-xs text-dim", {trim_text(l, "created_at")} }
                         td { class: "p-2.5 font-data text-xs", {trim_text(l, "model")} }
