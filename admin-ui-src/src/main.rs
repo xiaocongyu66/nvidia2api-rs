@@ -769,7 +769,7 @@ fn Settings() -> Element {
         ErrBox { msg: err() }
         if !msg().is_empty() { div { class: "mb-3 border-l-[3px] border-nvgreen bg-nvgreen/10 px-4 py-2 text-sm text-alive", {msg()} } }
         div { class: "rounded-lg border border-line bg-panel p-4",
-            p { class: "mb-2 text-xs text-dim", "JSON 格式, 例: {\"default_nvidia_rpm\": \"40\", \"max_routes_per_request\": \"50\"}" }
+            p { class: "mb-2 text-xs text-dim", "JSON 格式, 例: default_nvidia_rpm = 40, max_routes_per_request = 50 (值均为字符串)" }
             textarea {
                 class: "mb-2 w-full rounded border border-line bg-shell p-2 font-data text-xs focus:border-nvgreen focus:outline-none",
                 value: draft(),
