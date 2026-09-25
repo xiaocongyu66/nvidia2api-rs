@@ -774,7 +774,7 @@ fn Settings() -> Element {
                 class: "mb-2 w-full rounded border border-line bg-shell p-2 font-data text-xs focus:border-nvgreen focus:outline-none",
                 value: draft(),
                 oninput: move |e| draft.set(e.value()),
-                placeholder: "{\"default_nvidia_rpm\": \"40\"}",
+                placeholder: "default_nvidia_rpm = 40",
             }
             button {
                 class: "rounded bg-nvgreen px-4 py-1.5 text-sm font-bold text-black hover:opacity-90",
