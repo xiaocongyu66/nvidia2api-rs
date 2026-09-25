@@ -1,0 +1,57 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm   # 原生 aarch64 — 产物与部署机架构一致
+            name: linux-arm64
+          - os: ubuntu-24.04       # x86_64
+            name: linux-amd64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: install dioxus-cli (预编译, 秒级)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: dioxus-cli
+      - name: build web (wasm release + tailwind)
+        run: |
+          cd admin-ui-src
+          npm ci || npm install
+          npx @tailwindcss/cli -i assets/tailwind.css -o assets/tailwind.out.css
+          dx build --platform web --release
+      - name: embed web into binary
+        run: |
+          PUB=$(find admin-ui-src/target/dx -type d -name public | head -1)
+          rm -rf embedded/admin-ui && mkdir -p embedded/admin-ui
+          cp -r "$PUB"/* embedded/admin-ui/
+          # 预压缩 (服务端 Content-Encoding: gzip 直接下发)
+          find embedded/admin-ui -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.css' -o -name '*.html' \) -exec gzip -9 -kf {} \;
+      - name: test (纯 Rust 单测, 无需 wasm)
+        run: cargo test --lib --bins
+      - name: build rust 主程序 (web 已内嵌)
+        run: cargo build --release
+      - name: package (单文件 — web 内嵌)
+        run: |
+          mkdir -p pkg
+          cp target/release/nvidia2api-rs pkg/
+          tar czf nvidia2api-rs-${{ matrix.name }}.tar.gz -C pkg .
+          sha256sum nvidia2api-rs-${{ matrix.name }}.tar.gz > nvidia2api-rs-${{ matrix.name }}.tar.gz.sha256
+      - name: upload release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            nvidia2api-rs-${{ matrix.name }}.tar.gz
+            nvidia2api-rs-${{ matrix.name }}.tar.gz.sha256

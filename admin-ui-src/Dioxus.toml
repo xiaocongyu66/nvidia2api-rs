@@ -1,0 +1,15 @@
+[application]
+name = "nvidia2api-admin"
+
+[web.app]
+title = "nvidia2api-rs Console"
+
+[web.watcher]
+reload_html = true
+
+[web.resource]
+style = []
+dev = {}
+
+[[web.proxy]]
+backend = "http://127.0.0.1:8000"
