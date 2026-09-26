@@ -101,7 +101,7 @@ pub fn load_config() -> RegConfig {
 }
 
 pub fn save_config(cfg: &RegConfig) {
-    let pairs: [(&str, String); 14] = [
+    let pairs: [(&str, String); 17] = [
         ("reg_email_provider", cfg.email_provider.clone()),
         ("reg_cf_api_url", cfg.cf_api_url.clone()),
         ("reg_cf_admin_auth", cfg.cf_admin_auth.clone()),
