@@ -86,7 +86,8 @@ impl CloudflareTempEmail {
             .await
             .map_err(|e| e.to_string())?;
         let data: Value = resp.json().await.map_err(|e| e.to_string())?;
-        let address = data["address"].as_str().unwrap_or("").to_string();
+        // 不同 moemail 版本响应字段: address | email
+        let address = data["address"].as_str().or_else(|| data["email"].as_str()).unwrap_or("").to_string();
         let token = data["jwt"].as_str().unwrap_or("").to_string();
         if address.is_empty() || token.is_empty() {
             return Err(format!("email create failed: {data}"));
@@ -224,7 +225,8 @@ impl MoeMail {
         if status >= 400 {
             return Err(format!("moemail generate failed ({status}): {data}"));
         }
-        let address = data["address"].as_str().unwrap_or("").to_string();
+        // 不同 moemail 版本响应字段: address | email
+        let address = data["address"].as_str().or_else(|| data["email"].as_str()).unwrap_or("").to_string();
         let email_id = data["id"].as_str().map(String::from).or_else(|| data["id"].as_i64().map(|v| v.to_string())).unwrap_or_default();
         if address.is_empty() || email_id.is_empty() {
             return Err(format!("moemail generate failed: {data}"));
