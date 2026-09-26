@@ -58,7 +58,7 @@ async fn api_send(method: &'static str, path: &str, body: Option<Value>) -> Resu
         None => req.build().map_err(|e| e.to_string())?,
     };
     let resp = req.send().await.map_err(|e| e.to_string())?;
-    let status = resp.status().as_u16();
+    let status = resp.status();
     let text = resp.text().await.map_err(|e| e.to_string())?;
     if status >= 400 {
         // 后端错误形态: {"detail": "..."} 或 {"error": {"message": ...}}
