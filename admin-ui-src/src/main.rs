@@ -832,13 +832,13 @@ fn Register() -> Element {
         }
     });
 
-    // 状态轮询 (3s)
+    // 状态轮询 (2s, 运行中更快)
     use_future(move || async move {
         loop {
             if let Ok(v) = api_get("/api/admin/register/status").await {
                 status.set(Some(v));
             }
-            let _ = sleep_ms(3000).await;
+            let _ = sleep_ms(2000).await;
         }
     });
 
@@ -847,37 +847,62 @@ fn Register() -> Element {
         ErrBox { msg: err() }
         if !msg().is_empty() { div { class: "mb-3 rounded-sm border border-alive/40 bg-alive/10 px-3 py-2 text-sm text-alive", {msg()} } }
 
-        // 运行状态
+        // 运行状态: 实时数字卡 + 进度条 + 日志流
         match status() {
-            Some(st) => rsx! {
-                div { class: "mb-4 card",
-                    div { class: "flex flex-wrap items-center gap-x-5 gap-y-1 text-sm",
-                        span { class: if st["running"].as_bool().unwrap_or(false) { "font-bold text-alive" } else { "font-bold text-ink/55" },
-                            {if st["running"].as_bool().unwrap_or(false) { "● 运行中" } else { "○ 空闲" }} }
-                        span { class: "text-ink/55", "进度 " b { class: "text-ink", {format!("{}/{}", num_i64(&st, "done"), num_i64(&st, "count"))} } }
-                        span { class: "text-alive", {format!("成功 {}", num_i64(&st, "ok"))} }
-                        span { class: "text-down", {format!("失败 {}", num_i64(&st, "fail"))} }
-                        span { class: "text-alive", {format!("入库 {}", num_i64(&st, "imported"))} }
-                        if st["running"].as_bool().unwrap_or(false) {
-                            button {
-                                class: "ml-auto rounded border border-down/40 px-3 py-1 text-xs text-down hover:bg-down/10",
-                                onclick: move |_| {
-                                    spawn(async move {
-                                        match api_send("POST", "/api/admin/register/stop", None).await {
-                                            Ok(_) => msg.set("已发送停止信号 (当前账号完成后退出)".into()),
-                                            Err(e) => err.set(e),
-                                        }
-                                    });
-                                },
-                                "停止"
+            Some(st) => {
+                let running = st["running"].as_bool().unwrap_or(false);
+                let total = num_i64(&st, "count").max(1);
+                let done = num_i64(&st, "done");
+                let ok = num_i64(&st, "ok");
+                let fail = num_i64(&st, "fail");
+                let imported = num_i64(&st, "imported");
+                let pct = (done * 100 / total).min(100);
+                rsx! {
+                    div { class: "mb-4 card",
+                        div { class: "mb-3 flex flex-wrap items-center justify-between gap-3",
+                            div { class: "flex items-center gap-2",
+                                span { class: if running { "h-2.5 w-2.5 rounded-full bg-alive" } else { "h-2.5 w-2.5 rounded-full bg-ink/25" } }
+                                span { class: if running { "text-sm font-semibold text-alive" } else { "text-sm font-semibold text-ink/55" },
+                                    {if running { "注册进行中" } else { "空闲" }} }
+                                span { class: "text-xs text-ink/45", {format!("{} / {}", done, total)} }
+                            }
+                            if running {
+                                Button { variant: ButtonVariant::Destructive, class: "h-7 rounded-sm text-xs",
+                                    on_click: move |_| {
+                                        spawn(async move {
+                                            match api_send("POST", "/api/admin/register/stop", None).await {
+                                                Ok(_) => msg.set("已发送停止信号 (当前账号完成后退出)".into()),
+                                                Err(e) => err.set(e),
+                                            }
+                                        });
+                                    },
+                                    "停止"
+                                }
                             }
                         }
-                    }
-                    pre { class: "log-box",
-                        {st["logs"].as_array().cloned().unwrap_or_default().iter().map(|l| l.as_str().unwrap_or("").to_string()).collect::<Vec<_>>().join("\n")}
+                        div { class: "mb-3 h-1.5 w-full overflow-hidden rounded-full bg-ink/10",
+                            div { class: "h-full rounded-full bg-alive transition-all", style: "width: {pct}%" }
+                        }
+                        div { class: "mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4",
+                            div { class: "rounded-sm border border-line bg-paper p-2.5 text-center",
+                                div { class: "stat-num text-alive", {format!("{ok}")} }
+                                div { class: "text-[11px] text-ink/50", "成功" } }
+                            div { class: "rounded-sm border border-line bg-paper p-2.5 text-center",
+                                div { class: "stat-num text-down", {format!("{fail}")} }
+                                div { class: "text-[11px] text-ink/50", "失败" } }
+                            div { class: "rounded-sm border border-line bg-paper p-2.5 text-center",
+                                div { class: "stat-num", {format!("{imported}")} }
+                                div { class: "text-[11px] text-ink/50", "已入库" } }
+                            div { class: "rounded-sm border border-line bg-paper p-2.5 text-center",
+                                div { class: "stat-num", {format!("{done}/{total}")} }
+                                div { class: "text-[11px] text-ink/50", "总进度" } }
+                        }
+                        pre { class: "log-box",
+                            {st["logs"].as_array().cloned().unwrap_or_default().iter().map(|l| l.as_str().unwrap_or("").to_string()).collect::<Vec<_>>().join("\n")}
+                        }
                     }
                 }
-            },
+            }
             None => rsx! {},
         }
 
@@ -906,7 +931,13 @@ fn Register() -> Element {
         // 配置表单
         match cfg() {
             Some(c) => rsx! {
-                RegConfigForm { c: c }
+                RegConfigForm { c: c, on_saved: move |_| {
+                    spawn(async move {
+                        if let Ok(v) = api_get("/api/admin/register/config").await {
+                            cfg.set(Some(v));
+                        }
+                    });
+                } }
             },
             None => rsx! { div { class: "text-ink/55", "配置加载中…" } },
         }
@@ -914,7 +945,7 @@ fn Register() -> Element {
 }
 
 #[component]
-fn RegConfigForm(c: Value) -> Element {
+fn RegConfigForm(c: Value, on_saved: EventHandler<()>) -> Element {
     let email_provider_v = trim_text(&c, "email_provider");
     let cf_api_url_v = trim_text(&c, "cf_api_url");
     let cf_admin_auth_v = trim_text(&c, "cf_admin_auth");
@@ -1010,7 +1041,10 @@ fn RegConfigForm(c: Value) -> Element {
                     });
                     spawn(async move {
                         match api_send("POST", "/api/admin/register/config", Some(body)).await {
-                            Ok(_) => msg.set("配置已保存".into()),
+                            Ok(_) => {
+                                msg.set("配置已保存".into());
+                                on_saved.call(());
+                            }
                             Err(e) => err.set(e),
                         }
                     });
@@ -1026,10 +1060,10 @@ fn RegConfigForm(c: Value) -> Element {
 #[component]
 fn RegField(label: String, value: String, placeholder: String, oninput: EventHandler<String>) -> Element {
     rsx! {
-        div { class: "mb-2",
-            label { class: "mb-1 block text-xs text-ink/55", {label} }
+        div { class: "mb-3",
+            label { class: "mb-1 block text-xs font-medium text-ink/60", {label} }
             input {
-                class: "input",
+                class: "h-9 w-full rounded-sm border border-line bg-paper px-3 text-sm text-ink focus:border-ink focus:outline-none",
                 value: value,
                 oninput: move |e| oninput.call(e.value()),
                 placeholder: placeholder,
