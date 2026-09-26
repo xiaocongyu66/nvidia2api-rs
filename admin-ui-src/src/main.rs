@@ -1,5 +1,6 @@
 //! nvidia2api-rs 管理台 — NVIDIA 绿信号风格: 深底面板 + 竞速 Winner 视角。
 use dioxus::prelude::*;
+use lucide_dioxus::*;
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
@@ -117,7 +118,7 @@ fn ConsoleLayout() -> Element {
             div { class: "flex min-h-screen items-center justify-center text-ink",
                 div { class: "login-card fade-up",
                     div { class: "mb-5 flex items-center gap-3",
-                        div { class: "brand-dot", "⚡" }
+                        div { class: "brand-dot", Zap { class: "w-4 h-4" } }
                         div {
                             div { class: "text-base font-bold tracking-tight", "nvidia2api-rs" }
                             div { class: "text-[11px] text-dim", "NVIDIA API 多账号调度网关" }
@@ -163,7 +164,7 @@ fn ConsoleLayout() -> Element {
                                 }
                             });
                         },
-                        "进 入"
+                        LogIn { class: "w-4 h-4" } "进 入"
                     }
                 }
             }
@@ -173,26 +174,26 @@ fn ConsoleLayout() -> Element {
             div { class: "min-h-screen text-ink",
                 aside { class: "sidebar",
                     div { class: "mb-6 flex items-center gap-2.5 px-1",
-                        div { class: "brand-dot", "⚡" }
+                        div { class: "brand-dot", Zap { class: "w-4 h-4" } }
                         div {
                             div { class: "text-[13px] font-bold tracking-tight", "nvidia2api-rs" }
                             div { class: "text-[10px] text-dim", "race · schedule · win" }
                         }
                     }
-                    NavSide { to: Route::Overview {}, label: "概览", icon: "◈" }
-                    NavSide { to: Route::Keys {}, label: "NVIDIA Keys", icon: "⬢" }
-                    NavSide { to: Route::Proxies {}, label: "代理池", icon: "⇄" }
-                    NavSide { to: Route::Groups {}, label: "分组", icon: "❏" }
-                    NavSide { to: Route::Models {}, label: "模型", icon: "❖" }
-                    NavSide { to: Route::UKeys {}, label: "API Keys", icon: "✦" }
-                    NavSide { to: Route::Logs {}, label: "请求日志", icon: "≡" }
-                    NavSide { to: Route::Settings {}, label: "设置", icon: "⚙" }
-                    NavSide { to: Route::Register {}, label: "注册机", icon: "➕" }
+                    NavSide { to: Route::Overview {}, label: "概览", icon: Icon::Gauge }
+                    NavSide { to: Route::Keys {}, label: "NVIDIA Keys", icon: Icon::KeyRound }
+                    NavSide { to: Route::Proxies {}, label: "代理池", icon: Icon::ArrowLeftRight }
+                    NavSide { to: Route::Groups {}, label: "分组", icon: Icon::Layers }
+                    NavSide { to: Route::Models {}, label: "模型", icon: Icon::Boxes }
+                    NavSide { to: Route::UKeys {}, label: "API Keys", icon: Icon::KeySquare }
+                    NavSide { to: Route::Logs {}, label: "请求日志", icon: Icon::ScrollText }
+                    NavSide { to: Route::Settings {}, label: "设置", icon: Icon::Settings }
+                    NavSide { to: Route::Register {}, label: "注册机", icon: Icon::UserPlus }
                     div { class: "mt-auto",
                         button {
                             class: "nav-item w-full",
                             onclick: move |_| { set_token(""); authed.set(false); },
-                            span { class: "w-4 text-center text-dim", "⏻" }
+                            LogOut { class: "w-4 h-4 text-dim" }
                             "退出登录"
                         }
                     }
@@ -206,13 +207,25 @@ fn ConsoleLayout() -> Element {
 }
 
 #[component]
-fn NavSide(to: Route, label: &'static str, icon: &'static str) -> Element {
+fn NavSide(to: Route, label: &'static str, icon: Icon) -> Element {
     let route = use_route::<Route>();
     let active = route == to;
     rsx! {
         Link { to: to,
             class: if active { "nav-item nav-item-active" } else { "nav-item" },
-            span { class: if active { "w-4 text-center" } else { "w-4 text-center text-dim" }, {icon} }
+            span { class: if active { "shrink-0" } else { "shrink-0 text-dim" },
+                {match icon {
+                    Icon::Gauge => rsx! { Gauge { class: "w-[15px] h-[15px]" } },
+                    Icon::KeyRound => rsx! { KeyRound { class: "w-[15px] h-[15px]" } },
+                    Icon::ArrowLeftRight => rsx! { ArrowLeftRight { class: "w-[15px] h-[15px]" } },
+                    Icon::Layers => rsx! { Layers { class: "w-[15px] h-[15px]" } },
+                    Icon::Boxes => rsx! { Boxes { class: "w-[15px] h-[15px]" } },
+                    Icon::KeySquare => rsx! { KeySquare { class: "w-[15px] h-[15px]" } },
+                    Icon::ScrollText => rsx! { ScrollText { class: "w-[15px] h-[15px]" } },
+                    Icon::Settings => rsx! { Settings { class: "w-[15px] h-[15px]" } },
+                    Icon::UserPlus => rsx! { UserPlus { class: "w-[15px] h-[15px]" } },
+                }}
+            }
             {label}
         }
     }
@@ -922,7 +935,7 @@ fn Register() -> Element {
                         }
                     });
                 },
-                "开始注册"
+                Rocket { class: "w-4 h-4" } "开始注册"
             }
         }
 
@@ -1027,7 +1040,7 @@ fn RegConfigForm(c: Value) -> Element {
                         }
                     });
                 },
-                "保存配置"
+                Save { class: "w-4 h-4" } "保存配置"
             }
             if !msg().is_empty() { span { class: "ml-3 text-xs text-alive", {msg()} } }
             if !err().is_empty() { span { class: "ml-3 text-xs text-down", {err()} } }
@@ -1054,6 +1067,7 @@ fn RegField(label: String, value: String, placeholder: String, oninput: EventHan
 fn KeyRow(k: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick: Signal<u64>) -> Element {
     let id = num_i64(&k, "id");
     let is_disabled = trim_text(&k, "status") == "disabled";
+    let mut confirm = use_signal(|| false);
     rsx! {
         tr {
             td {{trim_text(&k, "name")} }
@@ -1078,32 +1092,36 @@ fn KeyRow(k: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick: 
                                 }
                             });
                         },
+                        Activity { class: "w-3.5 h-3.5" }
                         "测活"
                     }
-                    button {
-                        class: "btn-ghost",
-                        onclick: move |_| {
-                            let st = if is_disabled { "available" } else { "disabled" };
-                            spawn(async move {
-                                match api_send("PUT", &format!("/api/admin/nvidia-keys/{id}"), Some(serde_json::json!({"status": st}))).await {
-                                    Ok(_) => tick.set(tick() + 1),
-                                    Err(e) => err.set(e),
-                                }
-                            });
-                        },
-                        {if is_disabled { "启用" } else { "禁用" }}
-                    }
+                    SwitchRow { checked: !is_disabled, on_toggle: move |_| {
+                        let st = if is_disabled { "available" } else { "disabled" };
+                        spawn(async move {
+                            match api_send("PUT", &format!("/api/admin/nvidia-keys/{id}"), Some(serde_json::json!({"status": st}))).await {
+                                Ok(_) => tick.set(tick() + 1),
+                                Err(e) => err.set(e),
+                            }
+                        });
+                    } }
                     button {
                         class: "btn-danger",
-                        onclick: move |_| {
-                            spawn(async move {
-                                match api_send("DELETE", &format!("/api/admin/nvidia-keys/{id}"), None).await {
-                                    Ok(_) => tick.set(tick() + 1),
-                                    Err(e) => err.set(e),
-                                }
-                            });
-                        },
+                        onclick: move |_| confirm.set(true),
+                        Trash2 { class: "w-3.5 h-3.5" }
                         "删除"
+                    }
+                    if confirm() {
+                        ConfirmDialog { title: "删除该 NVIDIA Key".to_string(), desc: "删除后立即从调度池移除, 不可恢复。".to_string(),
+                            on_confirm: move |_| {
+                                confirm.set(false);
+                                spawn(async move {
+                                    match api_send("DELETE", &format!("/api/admin/nvidia-keys/{id}"), None).await {
+                                        Ok(_) => tick.set(tick() + 1),
+                                        Err(e) => err.set(e),
+                                    }
+                                });
+                            },
+                            on_cancel: move |_| confirm.set(false) }
                     }
                 }
             }
@@ -1115,6 +1133,7 @@ fn KeyRow(k: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick: 
 fn ProxyRow(p: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick: Signal<u64>) -> Element {
     let id = num_i64(&p, "id");
     let enabled = p["enabled"].as_bool().unwrap_or(false);
+    let mut confirm = use_signal(|| false);
     rsx! {
         tr {
             td {{trim_text(&p, "name")} }
@@ -1131,19 +1150,15 @@ fn ProxyRow(p: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick
             td {{format!("{}/{}", num_i64(&p, "success_count"), num_i64(&p, "failure_count"))} }
             td {
                 div { class: "flex gap-1.5",
-                    button {
-                        class: "btn-ghost",
-                        onclick: move |_| {
-                            let enable = !enabled;
-                            spawn(async move {
-                                match api_send("PUT", &format!("/api/admin/proxies/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
-                                    Ok(_) => { msg.set(String::new()); tick.set(tick() + 1); }
-                                    Err(e) => err.set(e),
-                                }
-                            });
-                        },
-                        {if enabled { "停用" } else { "启用" }}
-                    }
+                    SwitchRow { checked: enabled, on_toggle: move |_| {
+                        let enable = !enabled;
+                        spawn(async move {
+                            match api_send("PUT", &format!("/api/admin/proxies/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
+                                Ok(_) => { msg.set(String::new()); tick.set(tick() + 1); }
+                                Err(e) => err.set(e),
+                            }
+                        });
+                    } }
                     button {
                         class: "btn-ghost",
                         onclick: move |_| {
@@ -1158,19 +1173,27 @@ fn ProxyRow(p: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick
                                 }
                             });
                         },
+                        Globe { class: "w-3.5 h-3.5" }
                         "查IP"
                     }
                     button {
                         class: "btn-danger",
-                        onclick: move |_| {
-                            spawn(async move {
-                                match api_send("DELETE", &format!("/api/admin/proxies/{id}"), None).await {
-                                    Ok(_) => tick.set(tick() + 1),
-                                    Err(e) => err.set(e),
-                                }
-                            });
-                        },
+                        onclick: move |_| confirm.set(true),
+                        Trash2 { class: "w-3.5 h-3.5" }
                         "删除"
+                    }
+                    if confirm() {
+                        ConfirmDialog { title: "删除该代理".to_string(), desc: "删除后从调度线路中移除, 不可恢复。".to_string(),
+                            on_confirm: move |_| {
+                                confirm.set(false);
+                                spawn(async move {
+                                    match api_send("DELETE", &format!("/api/admin/proxies/{id}"), None).await {
+                                        Ok(_) => tick.set(tick() + 1),
+                                        Err(e) => err.set(e),
+                                    }
+                                });
+                            },
+                            on_cancel: move |_| confirm.set(false) }
                     }
                 }
             }
@@ -1181,6 +1204,7 @@ fn ProxyRow(p: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick
 #[component]
 fn GroupRow(g: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element {
     let id = num_i64(&g, "id");
+    let mut confirm = use_signal(|| false);
     rsx! {
         tr {
             td {{trim_text(&g, "name")} }
@@ -1214,19 +1238,15 @@ fn ModelRow(m: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element
             td { class: "text-dim", {trim_text(&m, "provider")} }
             td {Tag { status: if enabled { "enabled".to_string() } else { "disabled".to_string() } } }
             td {
-                button {
-                    class: "btn-ghost",
-                    onclick: move |_| {
-                        let enable = !enabled;
-                        spawn(async move {
-                            match api_send("PUT", &format!("/api/admin/models/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
-                                Ok(_) => tick.set(tick() + 1),
-                                Err(e) => err.set(e),
-                            }
-                        });
-                    },
-                    {if enabled { "停用" } else { "启用" }}
-                }
+                SwitchRow { checked: enabled, on_toggle: move |_| {
+                    let enable = !enabled;
+                    spawn(async move {
+                        match api_send("PUT", &format!("/api/admin/models/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
+                            Ok(_) => tick.set(tick() + 1),
+                            Err(e) => err.set(e),
+                        }
+                    });
+                } }
             }
         }
     }
@@ -1236,6 +1256,7 @@ fn ModelRow(m: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element
 fn UKeysRow(k: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element {
     let id = num_i64(&k, "id");
     let enabled = k["enabled"].as_bool().unwrap_or(false);
+    let mut confirm = use_signal(|| false);
     rsx! {
         tr {
             td {{trim_text(&k, "name")} }
@@ -1243,31 +1264,34 @@ fn UKeysRow(k: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element
             td {Tag { status: if enabled { "enabled".to_string() } else { "disabled".to_string() } } }
             td {{format!("{}/{}/{}", num_i64(&k, "total_requests"), num_i64(&k, "success_requests"), num_i64(&k, "failed_requests"))} }
             td {
-                div { class: "flex gap-1.5",
-                    button {
-                        class: "btn-ghost",
-                        onclick: move |_| {
-                            let enable = !enabled;
-                            spawn(async move {
-                                match api_send("PUT", &format!("/api/admin/api-keys/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
-                                    Ok(_) => tick.set(tick() + 1),
-                                    Err(e) => err.set(e),
-                                }
-                            });
-                        },
-                        {if enabled { "停用" } else { "启用" }}
-                    }
+                div { class: "flex items-center gap-2",
+                    SwitchRow { checked: enabled, on_toggle: move |_| {
+                        let enable = !enabled;
+                        spawn(async move {
+                            match api_send("PUT", &format!("/api/admin/api-keys/{id}"), Some(serde_json::json!({"enabled": enable}))).await {
+                                Ok(_) => tick.set(tick() + 1),
+                                Err(e) => err.set(e),
+                            }
+                        });
+                    } }
                     button {
                         class: "btn-danger",
-                        onclick: move |_| {
-                            spawn(async move {
-                                match api_send("DELETE", &format!("/api/admin/api-keys/{id}"), None).await {
-                                    Ok(_) => tick.set(tick() + 1),
-                                    Err(e) => err.set(e),
-                                }
-                            });
-                        },
+                        onclick: move |_| confirm.set(true),
+                        Trash2 { class: "w-3.5 h-3.5" }
                         "删除"
+                    }
+                    if confirm() {
+                        ConfirmDialog { title: "删除该 API Key".to_string(), desc: "调用此 Key 的客户端将立即 401, 不可恢复。".to_string(),
+                            on_confirm: move |_| {
+                                confirm.set(false);
+                                spawn(async move {
+                                    match api_send("DELETE", &format!("/api/admin/api-keys/{id}"), None).await {
+                                        Ok(_) => tick.set(tick() + 1),
+                                        Err(e) => err.set(e),
+                                    }
+                                });
+                            },
+                            on_cancel: move |_| confirm.set(false) }
                     }
                 }
             }
@@ -1291,6 +1315,38 @@ fn LogRow(l: Value) -> Element {
             td { class: "text-xs", {trim_text(&l, "winner_key_name")} }
             td { class: "text-xs text-dim", {format!("{}", num_i64(&l, "total_tokens"))} }
             td { class: "text-xs text-down", {format!("{} {}", trim_text(&l, "error_type"), num_i64(&l, "http_status"))} }
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Icon { Gauge, KeyRound, ArrowLeftRight, Layers, Boxes, KeySquare, ScrollText, Settings, UserPlus }
+
+/// shadcn Switch — 表格行启停。
+#[component]
+fn SwitchRow(checked: bool, on_toggle: EventHandler<()>) -> Element {
+    rsx! {
+        button {
+            class: if checked { "switch switch-on" } else { "switch" },
+            onclick: move |_| on_toggle.call(()),
+            span { class: "switch-knob" }
+        }
+    }
+}
+
+/// shadcn 风格确认对话框。
+#[component]
+fn ConfirmDialog(title: String, desc: String, on_confirm: EventHandler<()>, on_cancel: EventHandler<()>) -> Element {
+    rsx! {
+        div { class: "dialog-overlay",
+            div { class: "dialog-box fade-up",
+                div { class: "mb-1 text-sm font-bold", {title} }
+                div { class: "mb-5 text-xs text-dim leading-relaxed", {desc} }
+                div { class: "flex justify-end gap-2",
+                    button { class: "btn-ghost", onclick: move |_| on_cancel.call(()), "取消" }
+                    button { class: "btn-danger", onclick: move |_| on_confirm.call(()), "确认删除" }
+                }
+            }
         }
     }
 }

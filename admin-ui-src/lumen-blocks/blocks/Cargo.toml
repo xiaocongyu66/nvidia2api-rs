@@ -1,0 +1,24 @@
+[package]
+name = "lumen-blocks"
+version = "0.3.0"
+edition = "2024"
+description = "Accessible, styled, opinionated components for Dioxus inspired by the shadcn UI and built on Dioxus Primitives"
+readme = "../README.md"
+keywords = ["gui", "dioxus", "components", "shadcn", "tailwind"]
+categories = ["gui", "wasm"]
+authors = ["Daniel D’Aquino <daniel@daquino.me>"]
+license = "MIT"
+homepage = "https://lumenblocks.dev"
+repository = "https://github.com/Leaf-Computer/lumen-blocks"
+
+[dependencies]
+dioxus.workspace = true
+dioxus-sdk-time.workspace = true
+dioxus-primitives = { path = "../../dioxus-components/primitives", package = "dioxus-primitives" }
+tracing.workspace = true
+lucide-dioxus = { workspace = true, features = ["all-icons"] }
+log = "0.4"
+
+[dev-dependencies]
+dioxus.workspace = true
+env_logger = "0.10"

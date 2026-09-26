@@ -1,0 +1,27 @@
+[workspace]
+resolver = "3"
+members = ["blocks", "docsite"]
+
+[workspace.dependencies]
+lumen-blocks = { path = "blocks" }
+dioxus = "0.7.0"
+use-mdbook = { git = "https://github.com/DioxusLabs/docsite.git", rev = "029a529a02f3fe3d0b24c143bc7722850986dbfa" }
+mdbook-shared = { git = "https://github.com/DioxusLabs/docsite.git", rev = "029a529a02f3fe3d0b24c143bc7722850986dbfa" }
+mdbook-gen = { git = "https://github.com/DioxusLabs/docsite.git", rev = "029a529a02f3fe3d0b24c143bc7722850986dbfa" }
+syn = "2.0.98"
+tracing = { version = "0.1", features = ["std"] }
+docs = { path = "./docsite/docs" }
+dioxus-sdk-time = "0.7.0"
+lucide-dioxus = "2.45.0"
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"

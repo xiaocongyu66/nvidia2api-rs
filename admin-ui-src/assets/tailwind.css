@@ -17,6 +17,25 @@
     --color-alive: #57e389;
     --color-down: #ff6b60;
     --color-hold: #f0b429;
+
+    /* shadcn 语义层 (lumen-blocks 对齐) */
+    --color-background: #0a0e13;
+    --color-foreground: #e8eef5;
+    --color-card: #10151c;
+    --color-card-foreground: #e8eef5;
+    --color-primary: #76b900;
+    --color-primary-foreground: #06130a;
+    --color-secondary: #1a2230;
+    --color-secondary-foreground: #e8eef5;
+    --color-muted: #151c26;
+    --color-muted-foreground: #7d8b9c;
+    --color-accent: #1a2530;
+    --color-accent-foreground: #e8eef5;
+    --color-destructive: #ff6b60;
+    --color-destructive-foreground: #fff5f4;
+    --color-border: #222b38;
+    --color-input: #222b38;
+    --color-ring: #76b900;
 }
 
 @layer base {
@@ -43,6 +62,7 @@
 }
 
 @layer components {
+    :root { --radius: 8px; }
     /* ---- 面板卡 ---- */
     .card {
         border: 1px solid var(--color-line);
@@ -62,42 +82,42 @@
 
     /* ---- 按钮 ---- */
     .btn-primary {
-        display: inline-flex; align-items: center; gap: 6px;
-        border-radius: 10px;
+        display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+        border-radius: calc(var(--radius) + 2px);
         padding: 8px 18px;
-        font-size: 13px; font-weight: 700;
-        color: #06130a;
-        background: linear-gradient(135deg, #8ed810 0%, var(--color-nvgreen) 45%, #5f9500 100%);
-        box-shadow: 0 4px 16px rgba(118, 185, 0, 0.35), 0 1px 0 rgba(255,255,255,0.25) inset;
+        font-size: 13px; font-weight: 600;
+        color: var(--color-primary-foreground);
+        background: var(--color-primary);
+        box-shadow: 0 2px 10px rgba(118,185,0,0.28);
         cursor: pointer;
-        transition: filter .15s, transform .15s;
+        transition: all .15s;
     }
     .btn-primary:hover { filter: brightness(1.12); transform: translateY(-1px); }
     .btn-primary:active { transform: translateY(0); }
 
     .btn-ghost {
-        display: inline-flex; align-items: center; gap: 5px;
-        border-radius: 9px;
-        border: 1px solid var(--color-line);
-        background: rgba(255,255,255,0.02);
+        display: inline-flex; align-items: center; gap: 6px;
+        border-radius: calc(var(--radius) + 1px);
+        border: 1px solid var(--color-border);
+        background: transparent;
         padding: 5px 12px;
         font-size: 12px;
-        color: var(--color-ink);
+        color: var(--color-foreground);
         cursor: pointer;
-        transition: border-color .15s, color .15s, background .15s;
+        transition: all .15s;
     }
     .btn-ghost:hover { border-color: rgba(118,185,0,0.6); color: var(--color-nvgreen); background: rgba(118,185,0,0.08); }
 
     .btn-danger {
-        display: inline-flex; align-items: center; gap: 5px;
-        border-radius: 9px;
-        border: 1px solid rgba(255, 107, 96, 0.35);
-        background: rgba(255, 107, 96, 0.06);
+        display: inline-flex; align-items: center; gap: 6px;
+        border-radius: calc(var(--radius) + 1px);
+        border: 1px solid color-mix(in srgb, var(--color-destructive) 35%, transparent);
+        background: color-mix(in srgb, var(--color-destructive) 8%, transparent);
         padding: 5px 12px;
         font-size: 12px;
-        color: var(--color-down);
+        color: var(--color-destructive);
         cursor: pointer;
-        transition: background .15s, border-color .15s;
+        transition: all .15s;
     }
     .btn-danger:hover { background: rgba(255,107,96,0.14); border-color: rgba(255,107,96,0.6); }
 
@@ -246,3 +266,39 @@
         overflow-y: auto;
     }
 }
+
+    /* ---- Switch (shadcn) ---- */
+    .switch {
+        display: inline-flex; height: 20px; width: 36px; flex-shrink: 0;
+        align-items: center; border-radius: 999px;
+        border: 1px solid var(--color-border);
+        background: var(--color-secondary);
+        cursor: pointer;
+        transition: background .18s, border-color .18s;
+    }
+    .switch-on { background: var(--color-primary); border-color: var(--color-primary); }
+    .switch-knob {
+        display: block; width: 16px; height: 16px; border-radius: 999px;
+        background: #cbd5e1;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        transition: transform .18s, background .18s;
+        transform: translateX(2px);
+    }
+    .switch-on .switch-knob { background: var(--color-primary-foreground); transform: translateX(18px); }
+
+    /* ---- Dialog (shadcn) ---- */
+    .dialog-overlay {
+        position: fixed; inset: 0; z-index: 60;
+        background: rgba(2,4,8,0.72);
+        backdrop-filter: blur(3px);
+        display: flex; align-items: center; justify-content: center;
+        animation: fadeUp .18s ease both;
+    }
+    .dialog-box {
+        width: 380px;
+        border: 1px solid var(--color-border);
+        border-radius: 16px;
+        background: linear-gradient(180deg, #141b25, #0f141b);
+        box-shadow: 0 30px 70px rgba(0,0,0,0.65);
+        padding: 22px;
+    }
