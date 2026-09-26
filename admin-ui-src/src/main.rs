@@ -1003,7 +1003,7 @@ fn RegConfigForm(c: Value, on_saved: EventHandler<()>) -> Element {
                 div { class: "mb-2",
                     label { class: "mb-1 block text-xs text-ink/55", "邮箱服务" }
                     select {
-                        class: "input",
+                        class: "h-9 w-full rounded-sm border border-line bg-paper px-2 text-sm text-ink focus:border-ink focus:outline-none",
                         value: email_provider(),
                         onchange: move |e| email_provider.set(e.value()),
                         option { value: "cloudflare_temp_email", "cloudflare_temp_email (自部署)" }
@@ -1014,11 +1014,12 @@ fn RegConfigForm(c: Value, on_saved: EventHandler<()>) -> Element {
                 div { class: "mb-2",
                     label { class: "mb-1 block text-xs text-ink/55", "验证码模式" }
                     select {
-                        class: "input",
+                        class: "h-9 w-full rounded-sm border border-line bg-paper px-2 text-sm text-ink focus:border-ink focus:outline-none",
                         value: captcha_mode(),
                         onchange: move |e| captcha_mode.set(e.value()),
-                        option { value: "yescaptcha", "YesCaptcha" }
-                        option { value: "captcharun", "CaptchaRun" }
+                        option { value: "local", "本地浏览器人工过盾 (headless 需关)" }
+                        option { value: "yescaptcha", "YesCaptcha (打码平台)" }
+                        option { value: "captcharun", "Captcharun (打码平台)" }
                     }
                 }
                 RegField { label: "CF API URL".to_string(), value: cf_api_url(), placeholder: "https://your-cf-temp-email.example".to_string(), oninput: move |v| cf_api_url.set(v) }
