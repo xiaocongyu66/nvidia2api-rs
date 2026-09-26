@@ -12,6 +12,7 @@ wasm-bindgen = "0.2"
 js-sys = "0.3"
 gloo-net = "0.6"
 wasm-bindgen-futures = "0.4"
+lucide-dioxus = { version = "2.45", features = ["all-icons"] }
 
 [profile.dev]
 opt-level = 1

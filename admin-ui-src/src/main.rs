@@ -1,6 +1,7 @@
 //! nvidia2api-rs 管理台 — NVIDIA 绿信号风格: 深底面板 + 竞速 Winner 视角。
 use dioxus::prelude::*;
 use lucide_dioxus::*;
+use lucide_dioxus::Settings as CogIcon;
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
@@ -222,7 +223,7 @@ fn NavSide(to: Route, label: &'static str, icon: Icon) -> Element {
                     Icon::Boxes => rsx! { Boxes { class: "w-[15px] h-[15px]" } },
                     Icon::KeySquare => rsx! { KeySquare { class: "w-[15px] h-[15px]" } },
                     Icon::ScrollText => rsx! { ScrollText { class: "w-[15px] h-[15px]" } },
-                    Icon::Settings => rsx! { Settings { class: "w-[15px] h-[15px]" } },
+                    Icon::Settings => rsx! { CogIcon { class: "w-[15px] h-[15px]" } },
                     Icon::UserPlus => rsx! { UserPlus { class: "w-[15px] h-[15px]" } },
                 }}
             }
