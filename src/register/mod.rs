@@ -219,7 +219,8 @@ pub fn start(count: u32) -> Result<(), String> {
     match cfg.captcha_mode.as_str() {
         "yescaptcha" if cfg.yescaptcha_key.is_empty() => return Err("yescaptcha_key 未配置".into()),
         "captcharun" if cfg.captcharun_token.is_empty() => return Err("captcharun_token 未配置".into()),
-        m if m != "yescaptcha" && m != "captcharun" => return Err(format!("不支持的验证码模式: {m} (仅 yescaptcha/captcharun)")),
+        "local" if cfg.headless => return Err("local 模式需 headless=false (要看到浏览器窗口人工过盾)".into()),
+        m if m != "yescaptcha" && m != "captcharun" && m != "local" => return Err(format!("不支持的验证码模式: {m} (yescaptcha/captcharun/local)")),
         _ => {}
     }
     {

@@ -288,8 +288,31 @@ async fn inject_token(page: &playwright_rs::Page, token: &str) -> bool {
     false
 }
 
+/// local 模式: 本地真浏览器过盾 — 轮询 hCaptcha 响应框 (人工点选或浏览器自动通过)。
+/// 需 headless=false 才能看到挑战窗口。
+async fn solve_local(page: &playwright_rs::Page, timeout_secs: u64) -> Option<String> {
+    let js = "(() => { const t = document.querySelector('textarea[name=\"h-captcha-response\"], [name=\"g-recaptcha-response\"]'); return (t && t.value) ? t.value : ''; })()";
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(v) = page.evaluate::<Value, String>(js, None).await {
+            if !v.is_empty() {
+                return Some(v);
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    None
+}
+
 /// 求解 + 注入。返回 token 是否成功生效。
 pub async fn solve_and_inject(page: &playwright_rs::Page, cfg: &SolverConfig) -> Result<(), String> {
+    if cfg.mode == "local" {
+        return match solve_local(page, 180).await {
+            Some(t) if inject_token(page, &t).await => Ok(()),
+            Some(_) => Err("local token injected but register button stayed disabled".into()),
+            None => Err("local 过盾超时 (180s): 请确认 headless=false 且人工完成挑战".into()),
+        };
+    }
     let Some(site_key) = capture_sitekey(page).await else {
         return Err("hcaptcha sitekey not captured".into());
     };
