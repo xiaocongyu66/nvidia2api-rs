@@ -1,5 +1,8 @@
 //! nvidia2api-rs 管理台 — NVIDIA 绿信号风格: 深底面板 + 竞速 Winner 视角。
 use dioxus::prelude::*;
+use lumen_blocks::components::button::{Button, ButtonVariant};
+use lumen_blocks::components::input::Input;
+use lumen_blocks::components::switch::Switch;
 use lucide_dioxus::{
     Gauge, KeyRound, ArrowLeftRight, Layers, Boxes, KeySquare, ScrollText,
     Settings as CogIcon, UserPlus, Activity, Trash2, Globe, Upload, RefreshCw,
@@ -119,46 +122,19 @@ fn ConsoleLayout() -> Element {
 
     if !authed() {
         rsx! {
-            div { class: "flex min-h-screen items-center justify-center text-ink",
-                div { class: "login-card fade-up",
-                    div { class: "mb-5 flex items-center gap-3",
-                        div { class: "brand-dot", Zap { class: "w-4 h-4" } }
-                        div {
-                            div { class: "text-base font-bold tracking-tight", "nvidia2api-rs" }
-                            div { class: "text-[11px] text-dim", "NVIDIA API 多账号调度网关" }
-                        }
+            div { class: "flex min-h-screen items-center justify-center bg-paper text-ink",
+                div { class: "login-card",
+                    div { class: "mb-5 flex items-baseline gap-2",
+                        span { class: "text-lg font-semibold tracking-tight", "nvidia2api" }
+                        span { class: "text-xs text-ink/55", "多账号调度网关" }
                     }
-                    input {
-                        class: "input mb-2.5",
-                        placeholder: "用户名",
-                        value: username(),
-                        oninput: move |e| username.set(e.value()),
-                    }
-                    input {
-                        class: "input mb-4",
-                        r#type: "password",
-                        placeholder: "密码",
-                        value: password(),
-                        oninput: move |e| password.set(e.value()),
-                        onkeydown: move |e| {
-                            if e.key() == Key::Enter {
-                                let u = username();
-                                let pw = password();
-                                spawn(async move {
-                                    match login_request(u, pw).await {
-                                        Ok(t) => { set_token(&t); login_err.set(String::new()); authed.set(true); }
-                                        Err(e) => login_err.set(e),
-                                    }
-                                });
-                            }
-                        },
-                    }
+                    Input { placeholder: "用户名", class: "mb-2.5 h-9 rounded-sm border border-line bg-paper px-3 text-sm text-ink focus:border-ink focus:outline-none".to_string(), value: "{username()}", on_input: move |e: dioxus::prelude::FormEvent| username.set(e.value()) }
+                    Input { input_type: "password", placeholder: "密码", class: "mb-4 h-9 rounded-sm border border-line bg-paper px-3 text-sm text-ink focus:border-ink focus:outline-none".to_string(), value: "{password()}", on_input: move |e: dioxus::prelude::FormEvent| password.set(e.value()) }
                     if !login_err().is_empty() {
-                        div { class: "mb-3 rounded-lg border border-down/30 bg-down/10 px-3 py-2 text-xs text-down", {login_err()} }
+                        div { class: "mb-3 rounded-sm border border-down/40 bg-down/10 px-3 py-2 text-xs text-down", {login_err()} }
                     }
-                    button {
-                        class: "btn-primary w-full justify-center",
-                        onclick: move |_| {
+                    Button { variant: ButtonVariant::Primary, full_width: true, class: "h-9 rounded-sm text-sm",
+                        on_click: move |_| {
                             let u = username();
                             let pw = password();
                             spawn(async move {
@@ -168,41 +144,42 @@ fn ConsoleLayout() -> Element {
                                 }
                             });
                         },
-                        LogIn { class: "w-4 h-4" } "进 入"
+                        "登 录"
                     }
                 }
             }
         }
     } else {
         rsx! {
-            div { class: "min-h-screen text-ink",
-                aside { class: "sidebar",
-                    div { class: "mb-6 flex items-center gap-2.5 px-1",
-                        div { class: "brand-dot", Zap { class: "w-4 h-4" } }
-                        div {
-                            div { class: "text-[13px] font-bold tracking-tight", "nvidia2api-rs" }
-                            div { class: "text-[10px] text-dim", "race · schedule · win" }
+            div { class: "min-h-screen bg-paper text-ink",
+                header { class: "sticky top-0 z-30 border-b-2 border-ink bg-paper",
+                    div { class: "mx-auto flex w-full max-w-[1120px] flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3 sm:px-10",
+                        div { class: "flex items-baseline gap-2",
+                            span { class: "text-lg font-semibold tracking-tight", "nvidia2api" }
+                            span { class: "text-xs text-ink/55", "race · schedule · win" }
                         }
-                    }
-                    NavSide { to: Route::Overview {}, label: "概览", icon: Icon::Gauge }
-                    NavSide { to: Route::Keys {}, label: "NVIDIA Keys", icon: Icon::KeyRound }
-                    NavSide { to: Route::Proxies {}, label: "代理池", icon: Icon::ArrowLeftRight }
-                    NavSide { to: Route::Groups {}, label: "分组", icon: Icon::Layers }
-                    NavSide { to: Route::Models {}, label: "模型", icon: Icon::Boxes }
-                    NavSide { to: Route::UKeys {}, label: "API Keys", icon: Icon::KeySquare }
-                    NavSide { to: Route::Logs {}, label: "请求日志", icon: Icon::ScrollText }
-                    NavSide { to: Route::Settings {}, label: "设置", icon: Icon::Settings }
-                    NavSide { to: Route::Register {}, label: "注册机", icon: Icon::UserPlus }
-                    div { class: "mt-auto",
-                        button {
-                            class: "nav-item w-full",
-                            onclick: move |_| { set_token(""); authed.set(false); },
-                            LogOut { class: "w-4 h-4 text-dim" }
-                            "退出登录"
+                        nav { class: "flex flex-wrap items-center gap-1",
+                            NavTab { to: Route::Overview {}, label: "概览" }
+                            NavTab { to: Route::Keys {}, label: "NVIDIA Keys" }
+                            NavTab { to: Route::Proxies {}, label: "代理池" }
+                            NavTab { to: Route::Groups {}, label: "分组" }
+                            NavTab { to: Route::Models {}, label: "模型" }
+                            NavTab { to: Route::UKeys {}, label: "API Key" }
+                            NavTab { to: Route::Register {}, label: "注册机" }
+                            NavTab { to: Route::Logs {}, label: "日志" }
+                            NavTab { to: Route::Settings {}, label: "设置" }
+                        }
+                        div { class: "ml-auto flex items-center gap-2",
+                            span { class: "h-2 w-2 rounded-full bg-alive" }
+                            button {
+                                class: "text-xs text-ink/55 transition-colors hover:text-ink",
+                                onclick: move |_| { set_token(""); authed.set(false); },
+                                "退出"
+                            }
                         }
                     }
                 }
-                main { class: "ml-[224px] p-6",
+                main { class: "mx-auto w-full max-w-[1120px] px-6 py-8 sm:px-10",
                     Outlet::<Route> {}
                 }
             }
@@ -210,37 +187,26 @@ fn ConsoleLayout() -> Element {
     }
 }
 
+/// 顶部导航按钮: 大点击区, 激活态墨底反白。
 #[component]
-fn NavSide(to: Route, label: &'static str, icon: Icon) -> Element {
-    let route = use_route::<Route>();
-    let active = route == to;
+fn NavTab(to: Route, label: &'static str) -> Element {
+    let active = use_route::<Route>() == to;
+    let cls = if active {
+        "flex h-9 items-center rounded-sm bg-ink px-4 text-sm font-medium text-paper"
+    } else {
+        "flex h-9 items-center rounded-sm px-4 text-sm text-ink/60 transition-colors hover:bg-ink/[0.07] hover:text-ink"
+    };
     rsx! {
-        Link { to: to,
-            class: if active { "nav-item nav-item-active" } else { "nav-item" },
-            span { class: if active { "shrink-0" } else { "shrink-0 text-dim" },
-                {match icon {
-                    Icon::Gauge => rsx! { Gauge { class: "w-[15px] h-[15px]" } },
-                    Icon::KeyRound => rsx! { KeyRound { class: "w-[15px] h-[15px]" } },
-                    Icon::ArrowLeftRight => rsx! { ArrowLeftRight { class: "w-[15px] h-[15px]" } },
-                    Icon::Layers => rsx! { Layers { class: "w-[15px] h-[15px]" } },
-                    Icon::Boxes => rsx! { Boxes { class: "w-[15px] h-[15px]" } },
-                    Icon::KeySquare => rsx! { KeySquare { class: "w-[15px] h-[15px]" } },
-                    Icon::ScrollText => rsx! { ScrollText { class: "w-[15px] h-[15px]" } },
-                    Icon::Settings => rsx! { CogIcon { class: "w-[15px] h-[15px]" } },
-                    Icon::UserPlus => rsx! { UserPlus { class: "w-[15px] h-[15px]" } },
-                }}
-            }
-            {label}
-        }
+        Link { to, class: cls, {label} }
     }
 }
 
 #[component]
 fn PageHead(title: String, desc: String) -> Element {
     rsx! {
-        div { class: "mb-5 fade-up",
-            h2 { class: "page-title", {title} }
-            p { class: "page-desc", {desc} }
+        header { class: "mb-5 border-t-2 border-ink pt-3",
+            h2 { class: "text-sm font-semibold tracking-tight", {title} }
+            p { class: "mt-0.5 text-xs text-ink/45", {desc} }
         }
     }
 }
@@ -263,7 +229,7 @@ fn ErrBox(msg: String) -> Element {
     if msg.is_empty() {
         rsx! {}
     } else {
-        rsx! { div { class: "mb-3 rounded-lg border border-down/30 bg-down/10 px-3 py-2 text-sm text-down", {msg} } }
+        rsx! { div { class: "mb-3 rounded-sm border border-down/40 bg-down/10 px-3 py-2 text-sm text-down", {msg} } }
     }
 }
 
@@ -308,12 +274,12 @@ fn Overview() -> Element {
                     StatCard { label: "启用模型", value: format!("{}/{}", num_i64(&v["models"], "enabled"), num_i64(&v["models"], "total")) }
                     StatCard { label: "24h 成功率", value: format!("{:.1}%", num_f64(&v["requests_24h"], "success_rate")) }
                 }
-                div { class: "card",
+                div { class: "card card-hover",
                     div { class: "mb-2 text-sm font-semibold", "24h 请求" }
-                    div { class: "flex flex-wrap gap-x-6 gap-y-1 text-sm text-dim",
+                    div { class: "flex flex-wrap gap-x-6 gap-y-1 text-sm text-ink/55",
                         span { "总量 " b { class: "text-ink", {format!("{}", num_i64(&v["requests_24h"], "total"))} } }
                         span { "成功 " b { class: "text-alive", {format!("{}", num_i64(&v["requests_24h"], "success"))} } }
-                        span { "平均延迟 " b { class: "text-nvgreen", {format!("{:.0}ms", num_f64(&v["requests_24h"], "avg_latency_ms"))} } }
+                        span { "平均延迟 " b { class: "text-alive", {format!("{:.0}ms", num_f64(&v["requests_24h"], "avg_latency_ms"))} } }
                         span { "API Keys " b { class: "text-ink", {format!("{}", num_i64(&v["api_keys"], "total"))} } }
                     }
                 }
@@ -321,7 +287,7 @@ fn Overview() -> Element {
                     div { class: "mt-4 card",
                         div { class: "mb-2 text-sm font-semibold", "14 天用量" }
                         table { class: "w-full text-sm",
-                            thead { tr { class: "text-left text-xs text-dim",
+                            thead { tr { class: "text-left text-xs text-ink/55",
                                 th {"日期" } th {"总量" }
                                 th {"成功" } th {"平均延迟" }
                             } }
@@ -336,7 +302,7 @@ fn Overview() -> Element {
                         }
                     }
                 }
-                div { class: "mt-4 text-xs text-dim",
+                div { class: "mt-4 text-xs text-ink/55",
                     button {
                         class: "rounded border border-line px-3 py-1.5 hover:text-ink",
                         onclick: move |_| tick.set(tick() + 1),
@@ -344,7 +310,7 @@ fn Overview() -> Element {
                     }
                 }
             },
-            None => rsx! { div { class: "text-dim", "加载中…" } },
+            None => rsx! { div { class: "text-ink/55", "加载中…" } },
         }
     }
 }
@@ -353,8 +319,8 @@ fn Overview() -> Element {
 fn StatCard(label: String, value: String) -> Element {
     rsx! {
         div { class: "card text-center",
-            b { class: "block text-2xl text-nvgreen", {value} }
-            span { class: "text-xs text-dim", {label} }
+            b { class: "block text-2xl text-alive", {value} }
+            span { class: "text-xs text-ink/55", {label} }
         }
     }
 }
@@ -387,20 +353,19 @@ fn Keys() -> Element {
     rsx! {
         PageHead { title: "NVIDIA Keys".to_string(), desc: "Key 池: 导入 nvapi- Key, 每账号独立 RPM / 冷却 / 竞速调度".to_string() }
         ErrBox { msg: err() }
-        if !msg().is_empty() { div { class: "mb-3 rounded-lg border border-nvgreen/30 bg-nvgreen/10 px-3 py-2 text-sm text-alive", {msg()} } }
+        if !msg().is_empty() { div { class: "mb-3 rounded-sm border border-alive/40 bg-alive/10 px-3 py-2 text-sm text-alive", {msg()} } }
 
         div { class: "mb-4 card",
             div { class: "mb-2 text-sm font-semibold", "批量导入" }
-            p { class: "mb-2 text-xs text-dim", "每行一个: <code>主账号01---nvapi-xxx</code> 或裸 <code>nvapi-xxx</code>, 自动去重命名" }
+            p { class: "mb-2 text-xs text-ink/55", "每行一个: <code>主账号01---nvapi-xxx</code> 或裸 <code>nvapi-xxx</code>, 自动去重命名" }
             textarea {
-                class: "mb-2 w-full rounded border border-line bg-shell p-2 text-xs focus:border-nvgreen focus:outline-none",
+                class: "mb-2 w-full rounded border border-line bg-paper p-2 text-xs focus:border-nvgreen focus:outline-none",
                 placeholder: "nvapi-xxx\n主号02---nvapi-yyy",
                 value: import_text(),
                 oninput: move |e| import_text.set(e.value()),
             }
-            button {
-                class: "btn-primary",
-                onclick: move |_| {
+            Button { variant: ButtonVariant::Primary, class: "h-8 rounded-sm text-xs",
+                on_click: move |_| {
                     let text = import_text();
                     spawn(async move {
                         match api_send("POST", "/api/admin/nvidia-keys/import", Some(serde_json::json!({"text": text}))).await {
@@ -417,9 +382,9 @@ fn Keys() -> Element {
             }
         }
 
-        div { class: "card table-card",
+        div { class: "table-card card card-hover",
             table { class: "w-full text-sm",
-                thead { tr { class: "text-left text-xs text-dim",
+                thead { tr { class: "text-left text-xs text-ink/55",
                     th {"名称" } th {"Key" }
                     th {"状态" } th {"RPM" }
                     th {"成功/失败" } th {"冷却至" }
@@ -462,20 +427,19 @@ fn Proxies() -> Element {
     rsx! {
         PageHead { title: "代理池".to_string(), desc: "SOCKS5/HTTP/HTTPS · 启用上限 = Key数-1 · 每代理与直连竞速".to_string() }
         ErrBox { msg: err() }
-        if !msg().is_empty() { div { class: "mb-3 rounded-lg border border-nvgreen/30 bg-nvgreen/10 px-3 py-2 text-sm text-alive", {msg()} } }
+        if !msg().is_empty() { div { class: "mb-3 rounded-sm border border-alive/40 bg-alive/10 px-3 py-2 text-sm text-alive", {msg()} } }
 
         div { class: "mb-4 grid gap-3 md:grid-cols-2",
-            div { class: "card",
+            div { class: "card card-hover",
                 div { class: "mb-2 text-sm font-semibold", "批量导入" }
                 textarea {
-                    class: "mb-2 w-full rounded border border-line bg-shell p-2 text-xs focus:border-nvgreen focus:outline-none",
+                    class: "mb-2 w-full rounded border border-line bg-paper p-2 text-xs focus:border-nvgreen focus:outline-none",
                     placeholder: "socks5://user:pass@host:port\nhost:port (默认 socks5)",
                     value: import_text(),
                     oninput: move |e| import_text.set(e.value()),
                 }
-                button {
-                    class: "btn-primary",
-                    onclick: move |_| {
+                Button { variant: ButtonVariant::Primary, class: "h-8 rounded-sm text-xs",
+                    on_click: move |_| {
                         let text = import_text();
                         spawn(async move {
                             match api_send("POST", "/api/admin/proxies/import", Some(serde_json::json!({"text": text, "protocol": "socks5"}))).await {
@@ -491,11 +455,11 @@ fn Proxies() -> Element {
                     "导入"
                 }
             }
-            div { class: "card",
+            div { class: "card card-hover",
                 div { class: "mb-2 text-sm font-semibold", "全量测速" }
-                p { class: "mb-3 text-xs text-dim", "并发检测延迟 + 公网 IP + 地理位置" }
+                p { class: "mb-3 text-xs text-ink/55", "并发检测延迟 + 公网 IP + 地理位置" }
                 button {
-                    class: "rounded border border-line px-4 py-1.5 text-sm hover:text-nvgreen disabled:opacity-40",
+                    class: "rounded border border-line px-4 py-1.5 text-sm hover:text-alive disabled:opacity-40",
                     disabled: checking(),
                     onclick: move |_| {
                         checking.set(true);
@@ -511,9 +475,9 @@ fn Proxies() -> Element {
             }
         }
 
-        div { class: "card table-card",
+        div { class: "table-card card card-hover",
             table { class: "w-full text-sm",
-                thead { tr { class: "text-left text-xs text-dim",
+                thead { tr { class: "text-left text-xs text-ink/55",
                     th {"名称" } th {"协议" }
                     th {"状态" } th {"延迟" }
                     th {"公网 IP" } th {"位置" }
@@ -554,20 +518,19 @@ fn Groups() -> Element {
         ErrBox { msg: err() }
         div { class: "mb-4 flex flex-wrap items-center gap-2 card",
             input {
-                class: "input w-52",
+                class: "h-9 w-52 rounded-sm border border-line bg-paper px-3 text-sm text-ink focus:border-ink focus:outline-none",
                 placeholder: "分组名 (如: US-住宅)",
                 value: name(),
                 oninput: move |e| name.set(e.value()),
             }
             input {
-                class: "input w-40",
+                class: "h-9 w-40 rounded-sm border border-line bg-paper px-3 text-sm text-ink focus:border-ink focus:outline-none",
                 placeholder: "国家代码 (可选)",
                 value: country(),
                 oninput: move |e| country.set(e.value()),
             }
-            button {
-                class: "btn-primary",
-                onclick: move |_| {
+            Button { variant: ButtonVariant::Primary, class: "h-8 rounded-sm text-xs",
+                on_click: move |_| {
                     let n = name(); let c = country();
                     spawn(async move {
                         match api_send("POST", "/api/admin/proxy-groups", Some(serde_json::json!({"name": n, "country": c}))).await {
@@ -579,9 +542,9 @@ fn Groups() -> Element {
                 "创建"
             }
         }
-        div { class: "card",
+        div { class: "card card-hover",
             table { class: "w-full text-sm",
-                thead { tr { class: "text-left text-xs text-dim",
+                thead { tr { class: "text-left text-xs text-ink/55",
                     th {"名称" } th {"国家" }
                     th {"状态" } th {"操作" }
                 } }
@@ -621,7 +584,7 @@ fn Models() -> Element {
     rsx! {
         PageHead { title: "模型".to_string(), desc: "从 NVIDIA 同步模型列表, 仅启用模型对外暴露".to_string() }
         ErrBox { msg: err() }
-        if !msg().is_empty() { div { class: "mb-3 rounded-lg border border-nvgreen/30 bg-nvgreen/10 px-3 py-2 text-sm text-alive", {msg()} } }
+        if !msg().is_empty() { div { class: "mb-3 rounded-sm border border-alive/40 bg-alive/10 px-3 py-2 text-sm text-alive", {msg()} } }
         div { class: "mb-3",
             button {
                 class: "btn-primary disabled:opacity-40",
@@ -642,9 +605,9 @@ fn Models() -> Element {
                 {if syncing() { "同步中…" } else { "同步 NVIDIA 模型" }}
             }
         }
-        div { class: "card table-card",
+        div { class: "table-card card card-hover",
             table { class: "w-full text-sm",
-                thead { tr { class: "text-left text-xs text-dim",
+                thead { tr { class: "text-left text-xs text-ink/55",
                     th {"模型" } th {"Provider" }
                     th {"状态" } th {"操作" }
                 } }
@@ -685,21 +648,20 @@ fn UKeys() -> Element {
         PageHead { title: "API Keys".to_string(), desc: "sk-nvidia2api-* · SHA-256 存储 · 每 Key 独立限流".to_string() }
         ErrBox { msg: err() }
         if !raw_new().is_empty() {
-            div { class: "mb-3 rounded-lg border border-nvgreen bg-nvgreen/10 p-4",
+            div { class: "mb-3 rounded-lg border border-nvgreen bg-alive/10 p-4",
                 div { class: "mb-1 text-xs text-alive", "新 Key (仅此一次展示, 立即复制):" }
                 code { class: "break-all font-data text-xs text-ink", {raw_new()} }
             }
         }
         div { class: "mb-4 flex flex-wrap items-center gap-2 card",
             input {
-                class: "input w-52",
+                class: "h-9 w-52 rounded-sm border border-line bg-paper px-3 text-sm text-ink focus:border-ink focus:outline-none",
                 placeholder: "Key 名称",
                 value: name(),
                 oninput: move |e| name.set(e.value()),
             }
-            button {
-                class: "btn-primary",
-                onclick: move |_| {
+            Button { variant: ButtonVariant::Primary, class: "h-8 rounded-sm text-xs",
+                on_click: move |_| {
                     let n = name();
                     spawn(async move {
                         match api_send("POST", "/api/admin/api-keys", Some(serde_json::json!({"name": n}))).await {
@@ -711,9 +673,9 @@ fn UKeys() -> Element {
                 "创建"
             }
         }
-        div { class: "card",
+        div { class: "card card-hover",
             table { class: "w-full text-sm",
-                thead { tr { class: "text-left text-xs text-dim",
+                thead { tr { class: "text-left text-xs text-ink/55",
                     th {"名称" } th {"前缀" }
                     th {"状态" } th {"总/成/败" }
                     th {"操作" }
@@ -754,14 +716,14 @@ fn Logs() -> Element {
         ErrBox { msg: err() }
         div { class: "mb-3",
             button {
-                class: "rounded border border-line px-3 py-1.5 text-xs hover:text-nvgreen",
+                class: "rounded border border-line px-3 py-1.5 text-xs hover:text-alive",
                 onclick: move |_| tick.set(tick() + 1),
                 "刷新"
             }
         }
-        div { class: "card table-card",
+        div { class: "table-card card card-hover",
             table { class: "w-full text-sm",
-                thead { tr { class: "text-left text-xs text-dim",
+                thead { tr { class: "text-left text-xs text-ink/55",
                     th {"时间" } th {"模型" }
                     th {"状态" } th {"耗时" }
                     th {"TTFT" } th {"Winner 线路" }
@@ -802,18 +764,17 @@ fn Settings() -> Element {
     rsx! {
         PageHead { title: "运行时设置".to_string(), desc: "system_setting 表 · 运行时读取热生效".to_string() }
         ErrBox { msg: err() }
-        if !msg().is_empty() { div { class: "mb-3 rounded-lg border border-nvgreen/30 bg-nvgreen/10 px-3 py-2 text-sm text-alive", {msg()} } }
-        div { class: "card",
-            p { class: "mb-2 text-xs text-dim", "JSON 格式, 例: default_nvidia_rpm = 40, max_routes_per_request = 50 (值均为字符串)" }
+        if !msg().is_empty() { div { class: "mb-3 rounded-sm border border-alive/40 bg-alive/10 px-3 py-2 text-sm text-alive", {msg()} } }
+        div { class: "card card-hover",
+            p { class: "mb-2 text-xs text-ink/55", "JSON 格式, 例: default_nvidia_rpm = 40, max_routes_per_request = 50 (值均为字符串)" }
             textarea {
-                class: "input mb-2 font-data text-xs",
+                class: "mb-2 w-full rounded-sm border border-line bg-paper p-2 font-data text-xs text-ink focus:border-ink focus:outline-none",
                 value: draft(),
                 oninput: move |e| draft.set(e.value()),
                 placeholder: "default_nvidia_rpm = 40",
             }
-            button {
-                class: "btn-primary",
-                onclick: move |_| {
+            Button { variant: ButtonVariant::Primary, class: "h-8 rounded-sm text-xs",
+                on_click: move |_| {
                     let text = draft();
                     spawn(async move {
                         match serde_json::from_str::<Value>(&text) {
@@ -832,7 +793,7 @@ fn Settings() -> Element {
             Some(v) => rsx! {
                 div { class: "mt-4 card",
                     div { class: "mb-2 text-sm font-semibold", "当前值" }
-                    pre { class: "font-data text-xs text-dim", {serde_json::to_string_pretty(&v["settings"]).unwrap_or_default()} }
+                    pre { class: "font-data text-xs text-ink/55", {serde_json::to_string_pretty(&v["settings"]).unwrap_or_default()} }
                 }
             },
             None => rsx! {},
@@ -884,19 +845,19 @@ fn Register() -> Element {
     rsx! {
         PageHead { title: "注册机".to_string(), desc: "NVIDIA BUILD 账号自动注册 (playwright) · 成功即入 Key 池".to_string() }
         ErrBox { msg: err() }
-        if !msg().is_empty() { div { class: "mb-3 rounded-lg border border-nvgreen/30 bg-nvgreen/10 px-3 py-2 text-sm text-alive", {msg()} } }
+        if !msg().is_empty() { div { class: "mb-3 rounded-sm border border-alive/40 bg-alive/10 px-3 py-2 text-sm text-alive", {msg()} } }
 
         // 运行状态
         match status() {
             Some(st) => rsx! {
                 div { class: "mb-4 card",
                     div { class: "flex flex-wrap items-center gap-x-5 gap-y-1 text-sm",
-                        span { class: if st["running"].as_bool().unwrap_or(false) { "font-bold text-nvgreen" } else { "font-bold text-dim" },
+                        span { class: if st["running"].as_bool().unwrap_or(false) { "font-bold text-alive" } else { "font-bold text-ink/55" },
                             {if st["running"].as_bool().unwrap_or(false) { "● 运行中" } else { "○ 空闲" }} }
-                        span { class: "text-dim", "进度 " b { class: "text-ink", {format!("{}/{}", num_i64(&st, "done"), num_i64(&st, "count"))} } }
+                        span { class: "text-ink/55", "进度 " b { class: "text-ink", {format!("{}/{}", num_i64(&st, "done"), num_i64(&st, "count"))} } }
                         span { class: "text-alive", {format!("成功 {}", num_i64(&st, "ok"))} }
                         span { class: "text-down", {format!("失败 {}", num_i64(&st, "fail"))} }
-                        span { class: "text-nvgreen", {format!("入库 {}", num_i64(&st, "imported"))} }
+                        span { class: "text-alive", {format!("入库 {}", num_i64(&st, "imported"))} }
                         if st["running"].as_bool().unwrap_or(false) {
                             button {
                                 class: "ml-auto rounded border border-down/40 px-3 py-1 text-xs text-down hover:bg-down/10",
@@ -912,7 +873,7 @@ fn Register() -> Element {
                             }
                         }
                     }
-                    pre { class: "log-box mt-3 max-h-64",
+                    pre { class: "log-box",
                         {st["logs"].as_array().cloned().unwrap_or_default().iter().map(|l| l.as_str().unwrap_or("").to_string()).collect::<Vec<_>>().join("\n")}
                     }
                 }
@@ -923,14 +884,13 @@ fn Register() -> Element {
         // 启动
         div { class: "mb-4 flex flex-wrap items-center gap-2 card",
             input {
-                class: "input w-24",
+                class: "h-9 w-24 rounded-sm border border-line bg-paper px-3 text-sm text-ink focus:border-ink focus:outline-none",
                 value: count(),
                 oninput: move |e| count.set(e.value()),
                 placeholder: "数量",
             }
-            button {
-                class: "btn-primary",
-                onclick: move |_| {
+            Button { variant: ButtonVariant::Primary, class: "h-8 rounded-sm text-xs",
+                on_click: move |_| {
                     let n: u64 = count().parse().unwrap_or(1);
                     spawn(async move {
                         match api_send("POST", "/api/admin/register/start", Some(serde_json::json!({"count": n}))).await {
@@ -948,7 +908,7 @@ fn Register() -> Element {
             Some(c) => rsx! {
                 RegConfigForm { c: c }
             },
-            None => rsx! { div { class: "text-dim", "配置加载中…" } },
+            None => rsx! { div { class: "text-ink/55", "配置加载中…" } },
         }
     }
 }
@@ -986,10 +946,10 @@ fn RegConfigForm(c: Value) -> Element {
     let mut err = use_signal(|| String::new());
 
     rsx! {
-        div { class: "card",
+        div { class: "card card-hover",
             div { class: "grid gap-x-6 md:grid-cols-2",
                 div { class: "mb-2",
-                    label { class: "mb-1 block text-xs text-dim", "邮箱服务" }
+                    label { class: "mb-1 block text-xs text-ink/55", "邮箱服务" }
                     select {
                         class: "input",
                         value: email_provider(),
@@ -999,7 +959,7 @@ fn RegConfigForm(c: Value) -> Element {
                     }
                 }
                 div { class: "mb-2",
-                    label { class: "mb-1 block text-xs text-dim", "验证码模式" }
+                    label { class: "mb-1 block text-xs text-ink/55", "验证码模式" }
                     select {
                         class: "input",
                         value: captcha_mode(),
@@ -1019,9 +979,9 @@ fn RegConfigForm(c: Value) -> Element {
                 RegField { label: "组织名 (跳过手机验证)".to_string(), value: org_name(), placeholder: "nvidia2api-org".to_string(), oninput: move |v| org_name.set(v) }
                 RegField { label: "Key 过期日".to_string(), value: key_expiry(), placeholder: "2028-01-01".to_string(), oninput: move |v| key_expiry.set(v) }
                 div { class: "mb-2",
-                    label { class: "mb-1 block text-xs text-dim", "无头浏览器" }
+                    label { class: "mb-1 block text-xs text-ink/55", "无头浏览器" }
                     button {
-                        class: if headless() { "btn-ghost !text-nvgreen !border-nvgreen/60" } else { "btn-ghost" },
+                        class: if headless() { "btn-ghost !text-alive !border-alive/60" } else { "btn-ghost" },
                         onclick: move |_| headless.set(!headless()),
                         {if headless() { "headless ✓" } else { "headless ✗" }}
                     }
@@ -1056,7 +1016,7 @@ fn RegConfigForm(c: Value) -> Element {
 fn RegField(label: String, value: String, placeholder: String, oninput: EventHandler<String>) -> Element {
     rsx! {
         div { class: "mb-2",
-            label { class: "mb-1 block text-xs text-dim", {label} }
+            label { class: "mb-1 block text-xs text-ink/55", {label} }
             input {
                 class: "input",
                 value: value,
@@ -1075,17 +1035,16 @@ fn KeyRow(k: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick: 
     rsx! {
         tr {
             td {{trim_text(&k, "name")} }
-            td { class: "font-data text-xs text-dim", {trim_text(&k, "masked_key")} }
+            td { class: "font-data text-xs text-ink/55", {trim_text(&k, "masked_key")} }
             td {Tag { status: trim_text(&k, "status") } }
             td {{format!("{}", num_i64(&k, "rpm_limit"))} }
             td {{format!("{}/{}", num_i64(&k, "success_count"), num_i64(&k, "failure_count"))} }
-            td { class: "text-xs text-dim", {trim_text(&k, "cooldown_until")} }
+            td { class: "text-xs text-ink/55", {trim_text(&k, "cooldown_until")} }
             td { class: "text-xs text-down", {trim_text(&k, "last_error")} }
             td {
                 div { class: "flex gap-1.5",
-                    button {
-                        class: "btn-ghost",
-                        onclick: move |_| {
+                    Button { variant: ButtonVariant::Ghost, class: "h-7 rounded-sm text-xs",
+                        on_click: move |_| {
                             spawn(async move {
                                 match api_send("POST", &format!("/api/admin/nvidia-keys/{id}/test"), None).await {
                                     Ok(v) => {
@@ -1141,7 +1100,7 @@ fn ProxyRow(p: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick
     rsx! {
         tr {
             td {{trim_text(&p, "name")} }
-            td { class: "text-xs text-dim", {trim_text(&p, "protocol")} }
+            td { class: "text-xs text-ink/55", {trim_text(&p, "protocol")} }
             td {
                 div { class: "flex items-center gap-2",
                     Tag { status: trim_text(&p, "status") }
@@ -1150,7 +1109,7 @@ fn ProxyRow(p: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick
             }
             td {{match p["latency_ms"].as_f64() { Some(l) => format!("{l:.0}ms"), None => "-".into() }} }
             td { class: "text-xs", {trim_text(&p, "public_ip")} }
-            td { class: "text-xs text-dim", {format!("{} {}", trim_text(&p, "country"), trim_text(&p, "city"))} }
+            td { class: "text-xs text-ink/55", {format!("{} {}", trim_text(&p, "country"), trim_text(&p, "city"))} }
             td {{format!("{}/{}", num_i64(&p, "success_count"), num_i64(&p, "failure_count"))} }
             td {
                 div { class: "flex gap-1.5",
@@ -1163,9 +1122,8 @@ fn ProxyRow(p: Value, mut err: Signal<String>, mut msg: Signal<String>, mut tick
                             }
                         });
                     } }
-                    button {
-                        class: "btn-ghost",
-                        onclick: move |_| {
+                    Button { variant: ButtonVariant::Ghost, class: "h-7 rounded-sm text-xs",
+                        on_click: move |_| {
                             spawn(async move {
                                 match api_send("POST", &format!("/api/admin/proxies/{id}/fetch-ip"), None).await {
                                     Ok(v) => {
@@ -1215,9 +1173,8 @@ fn GroupRow(g: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element
             td {{trim_text(&g, "country")} }
             td {Tag { status: if g["enabled"].as_bool().unwrap_or(false) { "enabled".to_string() } else { "disabled".to_string() } } }
             td {
-                button {
-                    class: "btn-danger",
-                    onclick: move |_| {
+                Button { variant: ButtonVariant::Destructive, class: "h-7 rounded-sm text-xs",
+                    on_click: move |_| {
                         spawn(async move {
                             match api_send("DELETE", &format!("/api/admin/proxy-groups/{id}"), None).await {
                                 Ok(_) => tick.set(tick() + 1),
@@ -1239,7 +1196,7 @@ fn ModelRow(m: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element
     rsx! {
         tr {
             td { class: "font-data text-xs", {trim_text(&m, "model_name")} }
-            td { class: "text-dim", {trim_text(&m, "provider")} }
+            td { class: "text-ink/55", {trim_text(&m, "provider")} }
             td {Tag { status: if enabled { "enabled".to_string() } else { "disabled".to_string() } } }
             td {
                 SwitchRow { checked: enabled, on_toggle: move |_| {
@@ -1264,7 +1221,7 @@ fn UKeysRow(k: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element
     rsx! {
         tr {
             td {{trim_text(&k, "name")} }
-            td { class: "font-data text-xs text-dim", {trim_text(&k, "key_prefix")} }
+            td { class: "font-data text-xs text-ink/55", {trim_text(&k, "key_prefix")} }
             td {Tag { status: if enabled { "enabled".to_string() } else { "disabled".to_string() } } }
             td {{format!("{}/{}/{}", num_i64(&k, "total_requests"), num_i64(&k, "success_requests"), num_i64(&k, "failed_requests"))} }
             td {
@@ -1307,17 +1264,17 @@ fn UKeysRow(k: Value, mut err: Signal<String>, mut tick: Signal<u64>) -> Element
 fn LogRow(l: Value) -> Element {
     rsx! {
         tr {
-            td { class: "text-xs text-dim", {trim_text(&l, "created_at")} }
+            td { class: "text-xs text-ink/55", {trim_text(&l, "created_at")} }
             td { class: "font-data text-xs", {trim_text(&l, "model")} }
             td {Tag { status: trim_text(&l, "status") } }
             td {{format!("{:.0}ms", num_f64(&l, "duration_ms"))} }
             td {{match l["first_token_ms"].as_f64() { Some(t) => format!("{t:.0}ms"), None => "-".into() }} }
             td { class: "p-2.5 text-xs",
-                span { class: "text-dim", {trim_text(&l, "winner_route_type")} " · " }
+                span { class: "text-ink/55", {trim_text(&l, "winner_route_type")} " · " }
                 span { {trim_text(&l, "winner_proxy_name")} }
             }
             td { class: "text-xs", {trim_text(&l, "winner_key_name")} }
-            td { class: "text-xs text-dim", {format!("{}", num_i64(&l, "total_tokens"))} }
+            td { class: "text-xs text-ink/55", {format!("{}", num_i64(&l, "total_tokens"))} }
             td { class: "text-xs text-down", {format!("{} {}", trim_text(&l, "error_type"), num_i64(&l, "http_status"))} }
         }
     }
@@ -1329,12 +1286,12 @@ enum Icon { Gauge, KeyRound, ArrowLeftRight, Layers, Boxes, KeySquare, ScrollTex
 /// shadcn Switch — 表格行启停。
 #[component]
 fn SwitchRow(checked: bool, on_toggle: EventHandler<()>) -> Element {
+    let mut st = use_signal(move || checked);
     rsx! {
-        button {
-            class: if checked { "switch switch-on" } else { "switch" },
-            onclick: move |_| on_toggle.call(()),
-            span { class: "switch-knob" }
-        }
+        Switch { checked: st, on_checked_change: move |v| {
+            st.set(v);
+            on_toggle.call(());
+        } }
     }
 }
 
@@ -1345,10 +1302,10 @@ fn ConfirmDialog(title: String, desc: String, on_confirm: EventHandler<()>, on_c
         div { class: "dialog-overlay",
             div { class: "dialog-box fade-up",
                 div { class: "mb-1 text-sm font-bold", {title} }
-                div { class: "mb-5 text-xs text-dim leading-relaxed", {desc} }
+                div { class: "mb-5 text-xs text-ink/55 leading-relaxed", {desc} }
                 div { class: "flex justify-end gap-2",
-                    button { class: "btn-ghost", onclick: move |_| on_cancel.call(()), "取消" }
-                    button { class: "btn-danger", onclick: move |_| on_confirm.call(()), "确认删除" }
+                    Button { variant: ButtonVariant::Ghost, class: "h-8 rounded-sm text-xs", on_click: move |_| on_cancel.call(()), "取消" }
+                    Button { variant: ButtonVariant::Destructive, class: "h-8 rounded-sm text-xs", on_click: move |_| on_confirm.call(()), "确认删除" }
                 }
             }
         }
