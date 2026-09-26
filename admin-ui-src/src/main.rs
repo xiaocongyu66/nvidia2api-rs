@@ -94,26 +94,23 @@ fn App() -> Element {
 // 壳层: 登录闸门 + 顶部导航
 // ---------------------------------------------------------------------------
 
+async fn login_request(username: String, password: String) -> Result<String, String> {
+    match api_send("POST", "/api/admin/login",
+        Some(serde_json::json!({"username": username, "password": password}))).await {
+        Ok(v) => {
+            let t = trim_text(&v, "token");
+            if t.is_empty() { Err("登录失败".into()) } else { Ok(t) }
+        }
+        Err(e) => Err(e),
+    }
+}
+
 #[component]
 fn ConsoleLayout() -> Element {
     let mut authed = use_signal(|| !token().is_empty());
     let mut username = use_signal(String::new);
     let mut password = use_signal(String::new);
     let mut login_err = use_signal(String::new);
-
-    let do_login = move |_| {
-        spawn(async move {
-            match api_send("POST", "/api/admin/login",
-                Some(serde_json::json!({"username": username(), "password": password()}))).await {
-                Ok(v) => {
-                    let t = trim_text(&v, "token");
-                    if t.is_empty() { login_err.set("登录失败".into()); }
-                    else { set_token(&t); login_err.set(String::new()); authed.set(true); }
-                }
-                Err(e) => login_err.set(e),
-            }
-        });
-    };
 
     if !authed() {
         rsx! {
@@ -138,12 +135,36 @@ fn ConsoleLayout() -> Element {
                         placeholder: "密码",
                         value: password(),
                         oninput: move |e| password.set(e.value()),
-                        onkeydown: move |e| { if e.key() == Key::Enter { do_login(()); } },
+                        onkeydown: move |e| {
+                            if e.key() == Key::Enter {
+                                let u = username();
+                                let pw = password();
+                                spawn(async move {
+                                    match login_request(u, pw).await {
+                                        Ok(t) => { set_token(&t); login_err.set(String::new()); authed.set(true); }
+                                        Err(e) => login_err.set(e),
+                                    }
+                                });
+                            }
+                        },
                     }
                     if !login_err().is_empty() {
                         div { class: "mb-3 rounded-lg border border-down/30 bg-down/10 px-3 py-2 text-xs text-down", {login_err()} }
                     }
-                    button { class: "btn-primary w-full justify-center", onclick: do_login, "进 入" }
+                    button {
+                        class: "btn-primary w-full justify-center",
+                        onclick: move |_| {
+                            let u = username();
+                            let pw = password();
+                            spawn(async move {
+                                match login_request(u, pw).await {
+                                    Ok(t) => { set_token(&t); login_err.set(String::new()); authed.set(true); }
+                                    Err(e) => login_err.set(e),
+                                }
+                            });
+                        },
+                        "进 入"
+                    }
                 }
             }
         }
