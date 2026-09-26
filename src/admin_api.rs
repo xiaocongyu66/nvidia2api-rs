@@ -774,7 +774,7 @@ pub async fn register_config(State(state): State<Arc<AppState>>, headers: Header
     ok_json(json!({
         "email_provider": c.email_provider, "cf_api_url": c.cf_api_url, "cf_admin_auth": c.cf_admin_auth,
         "cf_domain": c.cf_domain, "duck_api_url": c.duck_api_url, "duck_domain": c.duck_domain,
-        "duck_api_key": c.duck_api_key, "captcha_mode": c.captcha_mode, "yescaptcha_key": c.yescaptcha_key,
+        "duck_api_key": c.duck_api_key, "mo_api_url": c.mo_api_url, "mo_api_key": c.mo_api_key, "mo_domain": c.mo_domain, "captcha_mode": c.captcha_mode, "yescaptcha_key": c.yescaptcha_key,
         "captcharun_token": c.captcharun_token, "headless": c.headless, "org_name": c.org_name,
         "key_name": c.key_name, "key_expiry": c.key_expiry,
     }))
@@ -794,6 +794,9 @@ pub async fn register_config_save(State(state): State<Arc<AppState>>, headers: H
         duck_api_url: s("duck_api_url"),
         duck_domain: s("duck_domain"),
         duck_api_key: s("duck_api_key"),
+        mo_api_url: s("mo_api_url"),
+        mo_api_key: s("mo_api_key"),
+        mo_domain: s("mo_domain"),
         captcha_mode: s("captcha_mode"),
         yescaptcha_key: s("yescaptcha_key"),
         captcharun_token: s("captcharun_token"),

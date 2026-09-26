@@ -922,6 +922,9 @@ fn RegConfigForm(c: Value) -> Element {
     let duck_api_url_v = trim_text(&c, "duck_api_url");
     let duck_domain_v = trim_text(&c, "duck_domain");
     let duck_api_key_v = trim_text(&c, "duck_api_key");
+    let mo_api_url_v = trim_text(&c, "mo_api_url");
+    let mo_api_key_v = trim_text(&c, "mo_api_key");
+    let mo_domain_v = trim_text(&c, "mo_domain");
     let captcha_mode_v = trim_text(&c, "captcha_mode");
     let yescaptcha_key_v = trim_text(&c, "yescaptcha_key");
     let captcharun_token_v = trim_text(&c, "captcharun_token");
@@ -936,6 +939,9 @@ fn RegConfigForm(c: Value) -> Element {
     let mut duck_api_url = use_signal(move || duck_api_url_v.clone());
     let mut duck_domain = use_signal(move || duck_domain_v.clone());
     let mut duck_api_key = use_signal(move || duck_api_key_v.clone());
+    let mut mo_api_url = use_signal(move || mo_api_url_v.clone());
+    let mut mo_api_key = use_signal(move || mo_api_key_v.clone());
+    let mut mo_domain = use_signal(move || mo_domain_v.clone());
     let mut captcha_mode = use_signal(move || captcha_mode_v.clone());
     let mut yescaptcha_key = use_signal(move || yescaptcha_key_v.clone());
     let mut captcharun_token = use_signal(move || captcharun_token_v.clone());
@@ -956,6 +962,7 @@ fn RegConfigForm(c: Value) -> Element {
                         onchange: move |e| email_provider.set(e.value()),
                         option { value: "cloudflare_temp_email", "cloudflare_temp_email (自部署)" }
                         option { value: "duckmail", "duckmail" }
+                        option { value: "moemail", "MoeMail (beilunyang/moemail)" }
                     }
                 }
                 div { class: "mb-2",
@@ -974,6 +981,9 @@ fn RegConfigForm(c: Value) -> Element {
                 RegField { label: "DuckMail API".to_string(), value: duck_api_url(), placeholder: "https://api.duckmail.sbs".to_string(), oninput: move |v| duck_api_url.set(v) }
                 RegField { label: "DuckMail 域名".to_string(), value: duck_domain(), placeholder: "duckmail.sbs".to_string(), oninput: move |v| duck_domain.set(v) }
                 RegField { label: "DuckMail Key".to_string(), value: duck_api_key(), placeholder: "".to_string(), oninput: move |v| duck_api_key.set(v) }
+                RegField { label: "MoeMail API".to_string(), value: mo_api_url(), placeholder: "https://your-moemail.pages.dev".to_string(), oninput: move |v| mo_api_url.set(v) }
+                RegField { label: "MoeMail Key".to_string(), value: mo_api_key(), placeholder: "X-API-Key".to_string(), oninput: move |v| mo_api_key.set(v) }
+                RegField { label: "MoeMail 域名".to_string(), value: mo_domain(), placeholder: "moemail.yourdomain.com".to_string(), oninput: move |v| mo_domain.set(v) }
                 RegField { label: "YesCaptcha Key".to_string(), value: yescaptcha_key(), placeholder: "clientKey".to_string(), oninput: move |v| yescaptcha_key.set(v) }
                 RegField { label: "CaptchaRun Token".to_string(), value: captcharun_token(), placeholder: "Bearer token".to_string(), oninput: move |v| captcharun_token.set(v) }
                 RegField { label: "组织名 (跳过手机验证)".to_string(), value: org_name(), placeholder: "nvidia2api-org".to_string(), oninput: move |v| org_name.set(v) }
@@ -993,7 +1003,8 @@ fn RegConfigForm(c: Value) -> Element {
                     let body = serde_json::json!({
                         "email_provider": email_provider(), "cf_api_url": cf_api_url(), "cf_admin_auth": cf_admin_auth(),
                         "cf_domain": cf_domain(), "duck_api_url": duck_api_url(), "duck_domain": duck_domain(),
-                        "duck_api_key": duck_api_key(), "captcha_mode": captcha_mode(), "yescaptcha_key": yescaptcha_key(),
+                        "duck_api_key": duck_api_key(), "mo_api_url": mo_api_url(), "mo_api_key": mo_api_key(),
+                        "mo_domain": mo_domain(), "captcha_mode": captcha_mode(), "yescaptcha_key": yescaptcha_key(),
                         "captcharun_token": captcharun_token(), "headless": headless(), "org_name": org_name(),
                         "key_expiry": key_expiry(),
                     });

@@ -201,3 +201,79 @@ mod tests {
         assert_eq!(extract_code("1123-4567"), None);
     }
 }
+
+/// MoeMail (beilunyang/moemail — Cloudflare Workers 临时邮箱)。
+pub struct MoeMail {
+    pub api_url: String, // 部署基址, 如 https://xxx.pages.dev
+    pub api_key: String, // X-API-Key
+    pub domain: String,
+}
+
+impl MoeMail {
+    pub async fn create_inbox(&self, name: &str) -> Result<Inbox, String> {
+        let resp = http()
+            .post(format!("{}/api/emails/generate", self.api_url))
+            .header("X-API-Key", &self.api_key)
+            .json(&serde_json::json!({"name": name, "expiryTime": 0, "domain": self.domain}))
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+        let data: Value = resp.json().await.map_err(|e| e.to_string())?;
+        if status >= 400 {
+            return Err(format!("moemail generate failed ({status}): {data}"));
+        }
+        let address = data["address"].as_str().unwrap_or("").to_string();
+        let email_id = data["id"].as_str().map(String::from).or_else(|| data["id"].as_i64().map(|v| v.to_string())).unwrap_or_default();
+        if address.is_empty() || email_id.is_empty() {
+            return Err(format!("moemail generate failed: {data}"));
+        }
+        Ok(Inbox { address, token: email_id })
+    }
+
+    pub async fn poll_code(&self, inbox: &Inbox, timeout_secs: u64) -> Option<String> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+        let client = http();
+        while tokio::time::Instant::now() < deadline {
+            let url = format!("{}/api/emails/{}", self.api_url, inbox.token);
+            if let Ok(resp) = client
+                .get(&url)
+                .header("X-API-Key", &self.api_key)
+                .timeout(std::time::Duration::from_secs(15))
+                .send()
+                .await
+            {
+                if let Ok(data) = resp.json::<Value>().await {
+                    let messages = data["messages"].as_array().cloned()
+                        .or_else(|| data["data"].as_array().cloned())
+                        .unwrap_or_default();
+                    for msg in messages {
+                        let mid = msg["id"].as_str().map(String::from)
+                            .or_else(|| msg["id"].as_i64().map(|v| v.to_string()));
+                        let Some(mid) = mid else { continue };
+                        let detail_url = format!("{}/api/emails/{}/{}", self.api_url, inbox.token, mid);
+                        if let Ok(d) = client
+                            .get(&detail_url)
+                            .header("X-API-Key", &self.api_key)
+                            .timeout(std::time::Duration::from_secs(15))
+                            .send()
+                            .await
+                        {
+                            if let Ok(d) = d.json::<Value>().await {
+                                let m = &d["message"];
+                                let mut body = m["html"].as_str().unwrap_or("").to_string();
+                                body.push_str(m["content"].as_str().unwrap_or(""));
+                                if let Some(code) = extract_code(&body) {
+                                    return Some(code);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+        None
+    }
+}

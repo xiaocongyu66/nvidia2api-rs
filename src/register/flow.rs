@@ -1,7 +1,7 @@
 //! 注册浏览器流程 (对齐原版 main.py register_account + finalize_and_create_key)。
 
 use super::captcha::{self, SolverConfig};
-use super::email::{CloudflareTempEmail, DuckMail, Inbox};
+use super::email::{CloudflareTempEmail, DuckMail, Inbox, MoeMail};
 use playwright_rs::{AriaRole, GetByRoleOptions, Playwright};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -18,6 +18,9 @@ pub struct FlowConfig {
     pub duck_api_url: String,
     pub duck_domain: String,
     pub duck_api_key: String,
+    pub mo_api_url: String,
+    pub mo_api_key: String,
+    pub mo_domain: String,
     pub solver: SolverConfig,
 }
 
@@ -63,6 +66,14 @@ pub async fn register_one(
 ) -> Result<(String, String), String> {
     log(&logf, "[1] 创建临时邮箱…");
     let inbox: Inbox = match cfg.email_provider.as_str() {
+        "moemail" => {
+            let mo = MoeMail {
+                api_url: cfg.mo_api_url.clone(),
+                api_key: cfg.mo_api_key.clone(),
+                domain: cfg.mo_domain.clone(),
+            };
+            mo.create_inbox(&format!("nv{}", super::rand_hex(8))).await?
+        }
         "duckmail" => {
             let dm = DuckMail {
                 api_url: cfg.duck_api_url.clone(),
@@ -349,6 +360,14 @@ pub async fn register_one(
 
 async fn poll_code(cfg: &FlowConfig, inbox: &Inbox, timeout_secs: u64) -> Option<String> {
     match cfg.email_provider.as_str() {
+        "moemail" => {
+            let mo = MoeMail {
+                api_url: cfg.mo_api_url.clone(),
+                api_key: cfg.mo_api_key.clone(),
+                domain: cfg.mo_domain.clone(),
+            };
+            mo.poll_code(inbox, timeout_secs).await
+        }
         "duckmail" => {
             let dm = DuckMail {
                 api_url: cfg.duck_api_url.clone(),

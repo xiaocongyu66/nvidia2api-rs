@@ -49,13 +49,16 @@ pub fn rand_password(len: usize) -> String {
 // ---------------------------------------------------------------------------
 
 pub struct RegConfig {
-    pub email_provider: String, // cloudflare_temp_email | duckmail
+    pub email_provider: String, // cloudflare_temp_email | duckmail | moemail
     pub cf_api_url: String,
     pub cf_admin_auth: String,
     pub cf_domain: String,
     pub duck_api_url: String,
     pub duck_domain: String,
     pub duck_api_key: String,
+    pub mo_api_url: String,
+    pub mo_api_key: String,
+    pub mo_domain: String,
     pub captcha_mode: String, // yescaptcha | captcharun
     pub yescaptcha_key: String,
     pub captcharun_token: String,
@@ -83,6 +86,9 @@ pub fn load_config() -> RegConfig {
         duck_api_url: setting("reg_duck_api_url", ""),
         duck_domain: setting("reg_duck_domain", ""),
         duck_api_key: setting("reg_duck_api_key", ""),
+        mo_api_url: setting("reg_mo_api_url", ""),
+        mo_api_key: setting("reg_mo_api_key", ""),
+        mo_domain: setting("reg_mo_domain", ""),
         captcha_mode: setting("reg_captcha_mode", "yescaptcha"),
         yescaptcha_key: setting("reg_yescaptcha_key", ""),
         captcharun_token: setting("reg_captcharun_token", ""),
@@ -103,6 +109,9 @@ pub fn save_config(cfg: &RegConfig) {
         ("reg_duck_api_url", cfg.duck_api_url.clone()),
         ("reg_duck_domain", cfg.duck_domain.clone()),
         ("reg_duck_api_key", cfg.duck_api_key.clone()),
+        ("reg_mo_api_url", cfg.mo_api_url.clone()),
+        ("reg_mo_api_key", cfg.mo_api_key.clone()),
+        ("reg_mo_domain", cfg.mo_domain.clone()),
         ("reg_captcha_mode", cfg.captcha_mode.clone()),
         ("reg_yescaptcha_key", cfg.yescaptcha_key.clone()),
         ("reg_captcharun_token", cfg.captcharun_token.clone()),
@@ -132,6 +141,9 @@ fn to_flow_config(cfg: &RegConfig) -> flow::FlowConfig {
         duck_api_url: cfg.duck_api_url.clone(),
         duck_domain: cfg.duck_domain.clone(),
         duck_api_key: cfg.duck_api_key.clone(),
+        mo_api_url: cfg.mo_api_url.clone(),
+        mo_api_key: cfg.mo_api_key.clone(),
+        mo_domain: cfg.mo_domain.clone(),
         solver: captcha::SolverConfig {
             mode: cfg.captcha_mode.clone(),
             yescaptcha_key: cfg.yescaptcha_key.clone(),
@@ -195,6 +207,9 @@ pub fn start(count: u32) -> Result<(), String> {
     match cfg.email_provider.as_str() {
         "duckmail" if cfg.duck_api_url.is_empty() || cfg.duck_domain.is_empty() => {
             return Err("duckmail: api_url / domain 未配置".into())
+        }
+        "moemail" if cfg.mo_api_url.is_empty() || cfg.mo_api_key.is_empty() || cfg.mo_domain.is_empty() => {
+            return Err("moemail: api_url / api_key / domain 未配置".into())
         }
         "cloudflare_temp_email" if cfg.cf_api_url.is_empty() || cfg.cf_admin_auth.is_empty() || cfg.cf_domain.is_empty() => {
             return Err("cloudflare_temp_email: api_url / admin_auth / domain 未配置".into())
