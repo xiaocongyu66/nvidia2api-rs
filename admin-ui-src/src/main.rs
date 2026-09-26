@@ -58,7 +58,17 @@ async fn api_send(method: &'static str, path: &str, body: Option<Value>) -> Resu
         None => req.build().map_err(|e| e.to_string())?,
     };
     let resp = req.send().await.map_err(|e| e.to_string())?;
+    let status = resp.status().as_u16();
     let text = resp.text().await.map_err(|e| e.to_string())?;
+    if status >= 400 {
+        // 后端错误形态: {"detail": "..."} 或 {"error": {"message": ...}}
+        let v: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        let msg = v["detail"].as_str()
+            .or_else(|| v["error"]["message"].as_str())
+            .or_else(|| v["message"].as_str())
+            .unwrap_or(&text).to_string();
+        return Err(format!("{msg}"));
+    }
     serde_json::from_str(&text).map_err(|e| format!("{e} | {text}"))
 }
 
@@ -919,7 +929,12 @@ fn Register() -> Element {
                     let n: u64 = count().parse().unwrap_or(1);
                     spawn(async move {
                         match api_send("POST", "/api/admin/register/start", Some(serde_json::json!({"count": n}))).await {
-                            Ok(_) => msg.set(format!("已启动 {n} 个注册任务")),
+                            Ok(_) => {
+                                msg.set(format!("已启动 {n} 个注册任务"));
+                                if let Ok(v) = api_get("/api/admin/register/status").await {
+                                    status.set(Some(v));
+                                }
+                            }
                             Err(e) => err.set(e),
                         }
                     });
