@@ -34,7 +34,7 @@ fn embedded_response(path: &str) -> Option<Response> {
             b = b.header("content-encoding", "gzip");
         }
         // index.html 永不缓存 (wasm/js 带 hash 可长缓存); 其余短缓存 + 协商
-        let is_html = mime == "text/html";
+        let is_html = mime.starts_with("text/html");
         b = b.header("cache-control", if is_html { "no-cache, must-revalidate" } else { "public, max-age=604800, immutable" });
         return Some(b.body(Body::from(f.contents().to_vec())).unwrap());
     }
