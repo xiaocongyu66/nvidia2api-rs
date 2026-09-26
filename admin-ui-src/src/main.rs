@@ -1,7 +1,10 @@
 //! nvidia2api-rs 管理台 — NVIDIA 绿信号风格: 深底面板 + 竞速 Winner 视角。
 use dioxus::prelude::*;
-use lucide_dioxus::*;
-use lucide_dioxus::Settings as CogIcon;
+use lucide_dioxus::{
+    Gauge, KeyRound, ArrowLeftRight, Layers, Boxes, KeySquare, ScrollText,
+    Settings as CogIcon, UserPlus, Activity, Trash2, Globe, Upload, RefreshCw,
+    Rocket, Save, LogIn, LogOut, Zap,
+};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
