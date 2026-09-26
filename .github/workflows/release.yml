@@ -35,6 +35,8 @@ jobs:
       - name: embed web into binary
         run: |
           PUB=$(find admin-ui-src/target/dx -type d -name public | head -1)
+          cp admin-ui-src/assets/tailwind.out.css "$PUB/assets/tailwind.out.css"
+          ls -la "$PUB/assets/" | head -8
           rm -rf embedded/admin-ui && mkdir -p embedded/admin-ui
           cp -r "$PUB"/* embedded/admin-ui/
           # 预压缩 (服务端 Content-Encoding: gzip 直接下发)
