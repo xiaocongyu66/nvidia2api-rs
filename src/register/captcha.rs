@@ -290,7 +290,10 @@ async fn inject_token(page: &playwright_rs::Page, token: &str) -> bool {
 
 /// 自动点击 hCaptcha 复选框: 遍历页面所有 frame, 命中 #checkbox 即点。
 async fn try_click_hcaptcha_checkbox(page: &playwright_rs::Page) -> bool {
-    for frame in page.frames() {
+    let Ok(frames) = page.frames().await else {
+        return false;
+    };
+    for frame in frames {
         let cb = frame.locator("#checkbox");
         if cb.click(None).await.is_ok() {
             return true;
