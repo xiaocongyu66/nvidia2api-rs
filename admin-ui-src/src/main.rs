@@ -1017,6 +1017,7 @@ fn RegConfigForm(c: Value, on_saved: EventHandler<()>) -> Element {
                         class: "h-9 w-full rounded-sm border border-line bg-paper px-2 text-sm text-ink focus:border-ink focus:outline-none",
                         value: captcha_mode(),
                         onchange: move |e| captcha_mode.set(e.value()),
+                        option { value: "sidecar", "CloakBrowser 侧车过盾 (推荐, 需本机 :8877)" }
                         option { value: "local", "本地浏览器自动过盾 (免费全自动)" }
                         option { value: "yescaptcha", "YesCaptcha (打码平台)" }
                         option { value: "captcharun", "Captcharun (打码平台)" }

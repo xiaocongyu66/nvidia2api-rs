@@ -331,8 +331,54 @@ async fn solve_local(page: &playwright_rs::Page, timeout_secs: u64) -> Option<St
     None
 }
 
+/// sidecar 模式: 调本地 CloakBrowser 侧车 (:8877) 求解 hCaptcha。
+/// 侧车在反检测浏览器里解挑战拿 token; token 与 sitekey+IP 绑定, 注入本会话即有效。
+async fn solve_sidecar(page: &playwright_rs::Page, timeout_secs: u64) -> Result<String, String> {
+    let Some(site_key) = capture_sitekey(page).await else {
+        return Err("hcaptcha sitekey not captured".into());
+    };
+    let page_url = page.url();
+    let body = serde_json::json!({
+        "type": "hcaptcha",
+        "sitekey": site_key,
+        "url": page_url,
+    });
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    while tokio::time::Instant::now() < deadline {
+        let remaining = (deadline - tokio::time::Instant::now()).as_secs().max(30);
+        let resp = http()
+            .post("http://127.0.0.1:8877/solve")
+            .json(&body)
+            .timeout(std::time::Duration::from_secs(remaining.min(170)))
+            .send()
+            .await;
+        match resp {
+            Ok(r) => match r.json::<Value>().await {
+                Ok(d) => {
+                    let tok = d["token"].as_str().unwrap_or("");
+                    if !tok.is_empty() {
+                        return Ok(tok.to_string());
+                    }
+                    // 侧车明确失败 (solved=false) — 换一次
+                }
+                Err(e) => return Err(format!("sidecar decode: {e}")),
+            },
+            Err(e) => return Err(format!("sidecar unreachable (需启动 :8877 侧车): {e}")),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+    Err("sidecar 求解超时".into())
+}
+
 /// 求解 + 注入。返回 token 是否成功生效。
 pub async fn solve_and_inject(page: &playwright_rs::Page, cfg: &SolverConfig) -> Result<(), String> {
+    if cfg.mode == "sidecar" {
+        return match solve_sidecar(page, 180).await {
+            Ok(t) if inject_token(page, &t).await => Ok(()),
+            Ok(_) => Err("sidecar token injected but register button stayed disabled".into()),
+            Err(e) => Err(e),
+        };
+    }
     if cfg.mode == "local" {
         return match solve_local(page, 180).await {
             Some(t) if inject_token(page, &t).await => Ok(()),
