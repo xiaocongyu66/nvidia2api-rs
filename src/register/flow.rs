@@ -173,6 +173,20 @@ pub async fn register_one(
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
         if email_input.count().await.unwrap_or(0) == 0 {
+            let url = page.url();
+            log(&logf, &format!("[diag] url: {url}"));
+            let btns = page
+                .evaluate::<serde_json::Value, serde_json::Value>(
+                    "(() => { const els = [...document.querySelectorAll('button, a')]; return els.slice(0, 40).map(e => (e.innerText || e.getAttribute('aria-label') || '').trim()).filter(Boolean); })()",
+                    None,
+                )
+                .await;
+            match btns {
+                Ok(v) => log(&logf, &format!("[diag] 页面元素: {}", v)),
+                Err(e) => log(&logf, &format!("[diag] dump 失败: {e}")),
+            }
+            let _ = page.screenshot().path("/tmp/nv-debug.png").await;
+            log(&logf, "[diag] 截图: /tmp/nv-debug.png");
             return Err("email input not found".into());
         }
 
