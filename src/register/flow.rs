@@ -99,7 +99,7 @@ pub async fn register_one(
         Ok(v) => v,
         Err(e) => {
             let m = format!("[✗] playwright 启动失败: {e} (需安装 playwright 驱动与浏览器)");
-            log(&logf, m.clone());
+            log(&logf, &m);
             return Err(m);
         }
     };
@@ -118,7 +118,7 @@ pub async fn register_one(
         Ok(v) => v,
         Err(e) => {
             let m = format!("[✗] chromium 启动失败: {e} (需 playwright install chromium)");
-            log(&logf, m.clone());
+            log(&logf, &m);
             return Err(m);
         }
     };
@@ -126,7 +126,7 @@ pub async fn register_one(
         Ok(v) => v,
         Err(e) => {
             let m = format!("[✗] new_page 失败: {e}");
-            log(&logf, m.clone());
+            log(&logf, &m);
             return Err(m);
         }
     };
