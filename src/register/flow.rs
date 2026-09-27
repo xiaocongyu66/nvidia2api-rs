@@ -185,8 +185,6 @@ pub async fn register_one(
                 Ok(v) => log(&logf, &format!("[diag] 页面元素: {}", v)),
                 Err(e) => log(&logf, &format!("[diag] dump 失败: {e}")),
             }
-            let _ = page.screenshot().path("/tmp/nv-debug.png").await;
-            log(&logf, "[diag] 截图: /tmp/nv-debug.png");
             return Err("email input not found".into());
         }
 
