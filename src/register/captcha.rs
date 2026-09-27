@@ -446,6 +446,7 @@ async fn watch_getcaptcha(page: &playwright_rs::Page) {
 
 /// 挑战指纹: prompt + 首图 URL 的 sha256 短摘要 (答错刷新后指纹必变)。
 fn challenge_fingerprint(data: &Value) -> String {
+    use sha2::Digest;
     let prompt = extract_prompt(data);
     let first = data["tasklist"]
         .as_array()

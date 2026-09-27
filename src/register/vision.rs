@@ -70,11 +70,13 @@ pub fn ensure_engine() -> Result<(), String> {
         std::env::set_var("ORT_DYLIB_PATH", &dylib_path);
     }
 
-    let session = ort::session::Session::builder()
-        .and_then(|b| b.with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3))
-        .and_then(|b| b.with_intra_threads(4))
-        .and_then(|b| b.commit_from_file(&model_path))
-        .map_err(|e| format!("ort session init: {e}"))?;
+    // ort builder 的错误类型是 Error<SessionBuilder> (可恢复), 逐步 map_err 避开 and_then 类型不匹配
+    let b = ort::session::Session::builder().map_err(|e| format!("ort builder: {e}"))?;
+    let b = b
+        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
+        .map_err(|e| format!("ort opt level: {e}"))?;
+    let b = b.with_intra_threads(4).map_err(|e| format!("ort threads: {e}"))?;
+    let session = b.commit_from_file(&model_path).map_err(|e| format!("ort session init: {e}"))?;
 
     // 解析预计算嵌入
     let raw: Value = serde_json::from_str(TEXT_EMBEDDINGS_JSON).map_err(|e| format!("parse embeddings: {e}"))?;
@@ -160,18 +162,18 @@ pub fn embed_images(images: &[(String, Vec<u8>)]) -> Result<Vec<[f32; EMBED_DIM]
     let outputs = session
         .run(ort::inputs!["pixel_values" => tensor])
         .map_err(|e| format!("run: {e}"))?;
-    let view = outputs["image_embeds"]
-        .try_extract_array::<f32>()
+    // try_extract_tensor 无需 ndarray feature, 返回 (shape, &[f32]) 平铺数据
+    let (shape, flat) = outputs["image_embeds"]
+        .try_extract_tensor::<f32>()
         .map_err(|e| format!("extract: {e}"))?;
+    if flat.len() < n * EMBED_DIM {
+        return Err(format!("output size {} < {n}×{EMBED_DIM} (shape {shape:?})", flat.len()));
+    }
 
     let mut out = Vec::with_capacity(n);
-    for row in view.rows() {
+    for i in 0..n {
         let mut e = [0f32; EMBED_DIM];
-        for (i, v) in row.iter().enumerate() {
-            if i < EMBED_DIM {
-                e[i] = *v;
-            }
-        }
+        e.copy_from_slice(&flat[i * EMBED_DIM..(i + 1) * EMBED_DIM]);
         let norm = e.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
         for x in &mut e {
             *x /= norm;
