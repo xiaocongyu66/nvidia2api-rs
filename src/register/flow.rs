@@ -108,9 +108,11 @@ pub async fn register_one(
         .launch_with_options(
             playwright_rs::LaunchOptions::new()
                 .headless(cfg.headless)
+                .user_agent("Mozilla/5.0 (X11; Linux aarch64; rv:133.0) Gecko/20100101 Firefox/133.0")
                 .args(vec![
                     "--no-sandbox".into(),
                     "--disable-blink-features=AutomationControlled".into(),
+                    "--lang=zh-CN".into(),
                 ]),
         )
         .await
@@ -181,6 +183,14 @@ pub async fn register_one(
                     None,
                 )
                 .await;
+            let body_len = page
+                .evaluate::<serde_json::Value, String>(
+                    "(() => document.body ? String(document.body.innerText.length) : '-1')()",
+                    None,
+                )
+                .await
+                .unwrap_or_default();
+            log(&logf, &format!("[diag] body 文本长度: {body_len}"));
             match btns {
                 Ok(v) => log(&logf, &format!("[diag] 页面元素: {}", v)),
                 Err(e) => log(&logf, &format!("[diag] dump 失败: {e}")),
