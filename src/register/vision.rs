@@ -75,7 +75,7 @@ pub fn ensure_engine() -> Result<(), String> {
     let b = b
         .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
         .map_err(|e| format!("ort opt level: {e}"))?;
-    let b = b.with_intra_threads(4).map_err(|e| format!("ort threads: {e}"))?;
+    let mut b = b.with_intra_threads(4).map_err(|e| format!("ort threads: {e}"))?;
     let session = b.commit_from_file(&model_path).map_err(|e| format!("ort session init: {e}"))?;
 
     // 解析预计算嵌入
