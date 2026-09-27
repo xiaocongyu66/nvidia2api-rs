@@ -303,15 +303,19 @@ async fn try_click_hcaptcha_checkbox(page: &playwright_rs::Page) -> bool {
 }
 
 /// local 模式: 本地浏览器全自动过盾 — 每 6s 一轮 (重置 widget + 点击 checkbox),
-/// 轮询响应框 token, 全程无人工。
+/// 跨 frame 轮询响应框 token (hCaptcha 响应在 challenge iframe 内), 全程无人工。
 async fn solve_local(page: &playwright_rs::Page, timeout_secs: u64) -> Option<String> {
     let js = "(() => { const t = document.querySelector('textarea[name=\"h-captcha-response\"], [name=\"g-recaptcha-response\"]'); return (t && t.value) ? t.value : ''; })()";
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
     let mut round = 0u32;
     while tokio::time::Instant::now() < deadline {
-        if let Ok(v) = page.evaluate::<Value, String>(js, None).await {
-            if !v.is_empty() {
-                return Some(v);
+        if let Ok(frames) = page.frames().await {
+            for f in frames {
+                if let Ok(v) = f.evaluate::<Value, String>(js, None).await {
+                    if !v.is_empty() {
+                        return Some(v);
+                    }
+                }
             }
         }
         if round % 6 == 0 {
@@ -330,7 +334,7 @@ pub async fn solve_and_inject(page: &playwright_rs::Page, cfg: &SolverConfig) ->
         return match solve_local(page, 180).await {
             Some(t) if inject_token(page, &t).await => Ok(()),
             Some(_) => Err("local token injected but register button stayed disabled".into()),
-            None => Err("local 过盾超时 (180s): 请确认 headless=false 且人工完成挑战".into()),
+            None => Err("local 自动过盾超时: hCaptcha 判定环境可疑 (可换打码平台模式)".into()),
         };
     }
     let Some(site_key) = capture_sitekey(page).await else {
