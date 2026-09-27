@@ -157,7 +157,7 @@ pub async fn register_one(
             }
         }
         if !login_opened {
-            let txt = page.get_by_text("登录", None);
+            let txt = page.get_by_text("登录", false);
             if txt.count().await.unwrap_or(0) > 0 {
                 let _ = txt.first().click(None).await;
             }
