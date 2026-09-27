@@ -288,17 +288,34 @@ async fn inject_token(page: &playwright_rs::Page, token: &str) -> bool {
     false
 }
 
-/// local 模式: 本地真浏览器过盾 — 轮询 hCaptcha 响应框 (人工点选或浏览器自动通过)。
-/// 需 headless=false 才能看到挑战窗口。
+/// 自动点击 hCaptcha 复选框: 遍历页面所有 frame, 命中 #checkbox 即点。
+async fn try_click_hcaptcha_checkbox(page: &playwright_rs::Page) -> bool {
+    for frame in page.frames() {
+        let cb = frame.locator("#checkbox");
+        if cb.click(None).await.is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+/// local 模式: 本地浏览器全自动过盾 — 每 6s 一轮 (重置 widget + 点击 checkbox),
+/// 轮询响应框 token, 全程无人工。
 async fn solve_local(page: &playwright_rs::Page, timeout_secs: u64) -> Option<String> {
     let js = "(() => { const t = document.querySelector('textarea[name=\"h-captcha-response\"], [name=\"g-recaptcha-response\"]'); return (t && t.value) ? t.value : ''; })()";
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    let mut round = 0u32;
     while tokio::time::Instant::now() < deadline {
         if let Ok(v) = page.evaluate::<Value, String>(js, None).await {
             if !v.is_empty() {
                 return Some(v);
             }
         }
+        if round % 6 == 0 {
+            reset_widget(page).await;
+        }
+        let _ = try_click_hcaptcha_checkbox(page).await;
+        round += 1;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     None
