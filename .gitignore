@@ -6,5 +6,5 @@ embedded/admin-ui/*
 !embedded/admin-ui/index.html
 data/
 *.sqlite3*
-register/
+/register/
 models/ort/*.tar.lzma2
