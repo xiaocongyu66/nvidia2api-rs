@@ -35,6 +35,19 @@ fn log(s: &LogFn, msg: &str) {
 }
 
 /// 点击按可访问名匹配的按钮 (依次尝试)。
+/// 在页面所有 frame 中找持有 selector 的 frame (SSO 登录表单在 iframe 里)。
+async fn find_frame_with(page: &playwright_rs::Page, selector: &str) -> Option<playwright_rs::Frame> {
+    let Ok(frames) = page.frames().await else {
+        return None;
+    };
+    for f in frames {
+        if f.locator(selector).count().await.unwrap_or(0) > 0 {
+            return Some(f);
+        }
+    }
+    None
+}
+
 async fn click_by_names(
     page: &playwright_rs::Page,
     names: &[&str],
@@ -164,17 +177,20 @@ pub async fn register_one(
                 let _ = txt.first().click(None).await;
             }
         }
-        // 等弹窗自动刷新稳定 (原版: 等第二个弹窗)
-        let email_input = page.locator("input[name=\"email\"]");
-        let deadline = now() + std::time::Duration::from_secs(15);
+        // 等弹窗 (SSO iframe) 渲染: 跨 frame 找 email input
+        let deadline = now() + std::time::Duration::from_secs(20);
+        let mut form_frame: Option<playwright_rs::Frame> = None;
         while now() < deadline {
-            if email_input.count().await.unwrap_or(0) >= 1 {
-                tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+            if let Some(f) = find_frame_with(&page, "input[name=\"email\"]").await {
+                form_frame = Some(f);
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
-        if email_input.count().await.unwrap_or(0) == 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+        let form_frame = match form_frame {
+            Some(f) => f,
+            None => {
             let url = page.url();
             log(&logf, &format!("[diag] url: {url}"));
             let btns = page
@@ -195,31 +211,30 @@ pub async fn register_one(
                 Ok(v) => log(&logf, &format!("[diag] 页面元素: {}", v)),
                 Err(e) => log(&logf, &format!("[diag] dump 失败: {e}")),
             }
-            return Err("email input not found".into());
-        }
+                return Err("email input not found".into());
+            }
+        };
 
-        // [4] 提交邮箱 → Next
+        // [4] 提交邮箱 → Next (iframe 内)
         log(&logf, "[4] 提交邮箱…");
         captcha::ensure_hcaptcha_hook(&page).await;
-        let email_input = page.locator("input[name=\"email\"]").first();
+        let email_input = form_frame.locator("input[name=\"email\"]").first();
         let _ = email_input.click(None).await;
         let _ = email_input.press_sequentially(&email, None).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        if click_by_names(&page, &["Next"], 5000).await.is_none() {
-            return Err("Next button not clickable".into());
+        let next_btn = form_frame.get_by_role(AriaRole::Button, Some(GetByRoleOptions::default().name("Next")));
+        if next_btn.count().await.unwrap_or(0) == 0 {
+            return Err("Next button not found".into());
         }
-        let _ = page
-            .wait_for_url("**/login.nvgs.nvidia.com/**", None)
-            .await;
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let _ = next_btn.first().click(None).await;
+        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
 
-        // [5] 填密码
+        // [5] 填密码 (iframe 内)
         log(&logf, "[5] 填写密码…");
-        let pw_field = page.locator("#registration_password");
         let deadline = now() + std::time::Duration::from_secs(30);
         let mut appeared = false;
         while now() < deadline {
-            if pw_field.count().await.unwrap_or(0) > 0 {
+            if form_frame.locator("#registration_password").count().await.unwrap_or(0) > 0 {
                 appeared = true;
                 break;
             }
@@ -228,8 +243,8 @@ pub async fn register_one(
         if !appeared {
             return Err("password field never appeared".into());
         }
-        let _ = pw_field.fill(&password, None).await;
-        let _ = page.locator("#registration_passwordConfirm").fill(&password, None).await;
+        let _ = form_frame.locator("#registration_password").fill(&password, None).await;
+        let _ = form_frame.locator("#registration_passwordConfirm").fill(&password, None).await;
 
         // [6] hCaptcha + 提交 (最多 3 次重试, 监听 register 响应)
         let mut accepted = false;
@@ -247,7 +262,7 @@ pub async fn register_one(
             }
             // 挂响应监听再点击
             captcha::watch_register_response(&page).await;
-            let btn = page.locator("#register_button");
+            let btn = form_frame.locator("#register_button");
             let mut clicked = false;
             for _ in 0..30 {
                 if btn.count().await.unwrap_or(0) > 0 && btn.is_enabled().await.unwrap_or(false) {
