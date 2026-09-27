@@ -36,7 +36,7 @@ fn log(s: &LogFn, msg: &str) {
 
 /// 点击按可访问名匹配的按钮 (依次尝试)。
 /// 在页面所有 frame 中找持有 selector 的 frame (SSO 登录表单在 iframe 里)。
-async fn find_frame_with(page: &playwright_rs::Page, selector: &str) -> Option<playwright_rs::Frame> {
+async fn find_frame_with(page: &playwright_rs::Page, selector: &str) -> Option<playwright_rs::protocol::Frame> {
     let Ok(frames) = page.frames().await else {
         return None;
     };
@@ -179,7 +179,7 @@ pub async fn register_one(
         }
         // 等弹窗 (SSO iframe) 渲染: 跨 frame 找 email input
         let deadline = now() + std::time::Duration::from_secs(20);
-        let mut form_frame: Option<playwright_rs::Frame> = None;
+        let mut form_frame: Option<playwright_rs::protocol::Frame> = None;
         while now() < deadline {
             if let Some(f) = find_frame_with(&page, "input[name=\"email\"]").await {
                 form_frame = Some(f);

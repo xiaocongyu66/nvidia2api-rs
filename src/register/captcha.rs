@@ -311,9 +311,12 @@ async fn solve_local(page: &playwright_rs::Page, timeout_secs: u64) -> Option<St
     while tokio::time::Instant::now() < deadline {
         if let Ok(frames) = page.frames().await {
             for f in frames {
-                if let Ok(v) = f.evaluate::<Value, String>(js, None).await {
-                    if !v.is_empty() {
-                        return Some(v);
+                // Frame::evaluate 固定返回 Value (1 泛型)
+                if let Ok(v) = f.evaluate::<Value>(js, None).await {
+                    if let Some(tok) = v.as_str() {
+                        if !tok.is_empty() {
+                            return Some(tok.to_string());
+                        }
                     }
                 }
             }
