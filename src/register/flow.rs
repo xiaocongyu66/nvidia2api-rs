@@ -121,7 +121,6 @@ pub async fn register_one(
         .launch_with_options(
             playwright_rs::LaunchOptions::new()
                 .headless(cfg.headless)
-                .user_agent("Mozilla/5.0 (X11; Linux aarch64; rv:133.0) Gecko/20100101 Firefox/133.0")
                 .args(vec![
                     "--no-sandbox".into(),
                     "--disable-blink-features=AutomationControlled".into(),
