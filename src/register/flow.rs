@@ -135,6 +135,7 @@ pub async fn register_one(
         // [2] build.nvidia.com
         log(&logf, "[2] 打开 build.nvidia.com…");
         let _ = page.goto("https://build.nvidia.com/", None).await;
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         let cookie = page.locator("#onetrust-accept-btn-handler");
         if cookie.count().await.unwrap_or(0) > 0 {
             let _ = cookie.click(None).await;
@@ -145,9 +146,21 @@ pub async fn register_one(
 
         // [3] 打开登录弹窗
         log(&logf, "[3] 打开 signin 弹窗…");
-        let login = page.get_by_role(AriaRole::Button, Some(GetByRoleOptions::default().name("Login")));
-        if login.count().await.unwrap_or(0) > 0 {
-            let _ = login.first().click(None).await;
+        // 多语言: 英文 Login / 中文 登录 / 文本兜底
+        let mut login_opened = false;
+        for name in ["Login", "登录", "Sign in", "Sign In"] {
+            let btn = page.get_by_role(AriaRole::Button, Some(GetByRoleOptions::default().name(name)));
+            if btn.count().await.unwrap_or(0) > 0 {
+                let _ = btn.first().click(None).await;
+                login_opened = true;
+                break;
+            }
+        }
+        if !login_opened {
+            let txt = page.get_by_text("登录", None);
+            if txt.count().await.unwrap_or(0) > 0 {
+                let _ = txt.first().click(None).await;
+            }
         }
         // 等弹窗自动刷新稳定 (原版: 等第二个弹窗)
         let email_input = page.locator("input[name=\"email\"]");
