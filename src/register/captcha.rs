@@ -24,6 +24,9 @@ fn http() -> reqwest::Client {
 // ---------------------------------------------------------------------------
 
 static SITEKEY: Mutex<Option<String>> = Mutex::new(None);
+
+/// getcaptcha 响应体嗅探槽 — 挑战提示词 + tile 图 URL 全在里面。
+static GETCAPTCHA: Mutex<Option<Value>> = Mutex::new(None);
 static REGISTER_STATUS: Mutex<Option<u16>> = Mutex::new(None);
 
 pub fn reset_sitekey() {
@@ -344,12 +347,14 @@ async fn solve_sidecar(page: &playwright_rs::Page, timeout_secs: u64) -> Result<
         "url": page_url,
     });
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    let mut last_err = String::from("sidecar 求解超时");
     while tokio::time::Instant::now() < deadline {
         let remaining = (deadline - tokio::time::Instant::now()).as_secs().max(30);
         let resp = http()
             .post("http://127.0.0.1:8877/solve")
             .json(&body)
-            .timeout(std::time::Duration::from_secs(remaining.min(170)))
+            // 侧车单次求解实测 ~70-105s, 上限压到 110s 给重试留预算
+            .timeout(std::time::Duration::from_secs(remaining.min(110)))
             .send()
             .await;
         match resp {
@@ -359,19 +364,32 @@ async fn solve_sidecar(page: &playwright_rs::Page, timeout_secs: u64) -> Result<
                     if !tok.is_empty() {
                         return Ok(tok.to_string());
                     }
-                    // 侧车明确失败 (solved=false) — 换一次
+                    last_err = format!("sidecar solved=false: {d}");
                 }
-                Err(e) => return Err(format!("sidecar decode: {e}")),
+                Err(e) => last_err = format!("sidecar 响应非 JSON (408/超时?): {e}"),
             },
-            Err(e) => return Err(format!("sidecar unreachable (需启动 :8877 侧车): {e}")),
+            Err(e) => {
+                last_err = format!("sidecar 请求失败: {e}");
+                // 仅连接被拒=侧车真没起; 重置/超时视为瞬时故障继续重试
+                if e.is_connect() {
+                    return Err(format!("sidecar unreachable (需启动 :8877 侧车): {e}"));
+                }
+            }
         }
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
-    Err("sidecar 求解超时".into())
+    Err(last_err)
 }
 
 /// 求解 + 注入。返回 token 是否成功生效。
 pub async fn solve_and_inject(page: &playwright_rs::Page, cfg: &SolverConfig) -> Result<(), String> {
+    if cfg.mode == "onnx" {
+        return match solve_onnx(page, 180).await {
+            Ok(t) if inject_token(page, &t).await => Ok(()),
+            Ok(_) => Err("onnx token injected but register button stayed disabled".into()),
+            Err(e) => Err(e),
+        };
+    }
     if cfg.mode == "sidecar" {
         return match solve_sidecar(page, 180).await {
             Ok(t) if inject_token(page, &t).await => Ok(()),
@@ -407,6 +425,305 @@ pub async fn solve_and_inject(page: &playwright_rs::Page, cfg: &SolverConfig) ->
     } else {
         Err("token injected but register button stayed disabled".into())
     }
+}
+
+/// 挂 getcaptcha 响应嗅探 (onnx 模式用) — 挑战数据落 GETCAPTCHA 槽。
+async fn watch_getcaptcha(page: &playwright_rs::Page) {
+    *GETCAPTCHA.lock().unwrap() = None;
+    let _ = page
+        .on_response(|resp| async move {
+            if resp.url().contains("getcaptcha") {
+                if let Ok(bytes) = resp.body().await {
+                    if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
+                        *GETCAPTCHA.lock().unwrap() = Some(v);
+                    }
+                }
+            }
+            Ok(())
+        })
+        .await;
+}
+
+/// 挑战指纹: prompt + 首图 URL 的 sha256 短摘要 (答错刷新后指纹必变)。
+fn challenge_fingerprint(data: &Value) -> String {
+    let prompt = extract_prompt(data);
+    let first = data["tasklist"]
+        .as_array()
+        .and_then(|l| l.first())
+        .and_then(|t| t["datapoint_uri"].as_str())
+        .unwrap_or("");
+    let mut h = sha2::Sha256::new();
+    h.update(prompt.as_bytes());
+    h.update(first.as_bytes());
+    hex::encode(&h.finalize()[..8])
+}
+
+/// 从 getcaptcha 响应提取提示词 (requester_question.en 兜底遍历)。
+fn extract_prompt(data: &Value) -> String {
+    let rq = &data["requester_question"];
+    for key in ["en", "en-US", "text"] {
+        if let Some(s) = rq[key].as_str() {
+            return s.to_string();
+        }
+    }
+    if let Some(s) = rq.as_str() {
+        return s.to_string();
+    }
+    if let Some(m) = rq.as_object() {
+        for v in m.values() {
+            if let Some(s) = v.as_str() {
+                return s.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// challenge iframe: URL 含 frame=challenge 或 newassets.hcaptcha.com。
+async fn find_challenge_frame(page: &playwright_rs::Page) -> Option<playwright_rs::protocol::Frame> {
+    let Ok(frames) = page.frames().await else {
+        return None;
+    };
+    for f in frames {
+        let u = f.url();
+        if u.contains("frame=challenge") || u.contains("newassets.hcaptcha.com") {
+            return Some(f);
+        }
+    }
+    None
+}
+
+/// 下载一张 tile 图 (2 次重试, 浏览器 UA)。
+async fn download_tile(client: &reqwest::Client, url: &str, ua: &str) -> Option<Vec<u8>> {
+    for _ in 0..2 {
+        if let Ok(resp) = client
+            .get(url)
+            .header("user-agent", ua)
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+        {
+            if let Ok(bytes) = resp.bytes().await {
+                if !bytes.is_empty() {
+                    return Some(bytes.to_vec());
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    None
+}
+
+/// 取 9 张 tile 图 — 三级来源: getcaptcha tasklist → background-image CSS → 元素截图。
+async fn fetch_tile_images(
+    page: &playwright_rs::Page,
+    data: &Value,
+    ua: &str,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let client = http();
+
+    // 来源 1: getcaptcha tasklist (全分辨率原图)
+    let urls: Vec<String> = data["tasklist"]
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .filter_map(|t| t["datapoint_uri"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !urls.is_empty() {
+        let mut out = Vec::new();
+        let mut ok = true;
+        for (i, u) in urls.iter().enumerate() {
+            match download_tile(&client, u, ua).await {
+                Some(b) => out.push((format!("tasklist-{i}"), b)),
+                None => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok && !out.is_empty() {
+            return Ok(out);
+        }
+    }
+
+    // 来源 2: challenge frame 里 .task-image .image 的 background-image CSS
+    if let Some(frame) = find_challenge_frame(page).await {
+        let js = r#"(() => {
+            const els = document.querySelectorAll('.task-image .image, .task-image');
+            const out = [];
+            for (const el of els) {
+                const bg = (el.style && el.style.backgroundImage) || '';
+                const m = bg.match(/url\(["']?([^"')]+)["']?\)/);
+                out.push(m ? m[1] : '');
+            }
+            return JSON.stringify(out);
+        })()"#;
+        if let Ok(v) = frame.evaluate::<Value>(js, None).await {
+            if let Some(s) = v.as_str() {
+            if let Ok(list) = serde_json::from_str::<Vec<String>>(s) {
+                let mut out = Vec::new();
+                let mut ok = true;
+                for (i, u) in list.iter().enumerate() {
+                    if u.is_empty() {
+                        ok = false;
+                        break;
+                    }
+                    match download_tile(&client, u, ua).await {
+                        Some(b) => out.push((format!("css-{i}"), b)),
+                        None => {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                if ok && !out.is_empty() {
+                    return Ok(out);
+                }
+            }
+            }
+        }
+
+        // 来源 3: 逐 tile 元素截图 (最后兜底)
+        let sel = if frame.locator(".task-image .image").count().await.unwrap_or(0) > 0 {
+            ".task-image .image"
+        } else {
+            ".task-image"
+        };
+        let n = frame.locator(sel).count().await.unwrap_or(0);
+        if n > 0 {
+            let mut out = Vec::new();
+            for i in 0..n {
+                if let Ok(bytes) = frame.locator(sel).nth(i as i32).screenshot(None).await {
+                    out.push((format!("shot-{i}"), bytes));
+                }
+            }
+            if !out.is_empty() {
+                return Ok(out);
+            }
+        }
+    }
+    Err("tile images unavailable (tasklist/css/screenshot 全失败)".into())
+}
+
+/// 处理一轮挑战: 路由题型 → 取图 → 分类 → 点 tile → 提交。
+async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Result<(), String> {
+    let prompt = extract_prompt(data);
+    let type_key = super::vision::route_type(&prompt)
+        .ok_or_else(|| format!("unsupported prompt: {prompt}"))?;
+    let spec = super::vision::spec_of(type_key).ok_or("spec missing")?;
+
+    let ua = page
+        .evaluate::<Value, String>("navigator.userAgent", None)
+        .await
+        .unwrap_or_else(|_| "Mozilla/5.0".into());
+    let tiles = fetch_tile_images(page, data, &ua).await?;
+    let embeds = super::vision::embed_images(&tiles)?;
+    let scores = super::vision::classify(type_key, &embeds)?;
+    let sets = super::vision::build_click_sets(&scores, spec.singular, spec.threshold);
+    let Some(set) = sets.first() else {
+        return Err("no click set generated".into());
+    };
+
+    let frame = find_challenge_frame(page)
+        .await
+        .ok_or("challenge frame not found")?;
+    let count = frame.locator(".task-image .image").count().await.unwrap_or(0);
+    let sel = if count > 0 { ".task-image .image" } else { ".task-image" };
+
+    for &i in set {
+        if (i as i32) < count as i32 || count == 0 {
+            let _ = frame.locator(sel).nth(i as i32).click(None).await;
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    }
+
+    let submit = frame.locator(".button-submit");
+    for _ in 0..10 {
+        if submit.count().await.unwrap_or(0) > 0 && submit.is_enabled().await.unwrap_or(false) {
+            let _ = submit.click(None).await;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    Ok(())
+}
+
+/// 解不了时刷新换题 (对齐 Impulse 的 refresh 循环)。
+async fn refresh_challenge(page: &playwright_rs::Page) -> bool {
+    let Some(frame) = find_challenge_frame(page).await else {
+        return false;
+    };
+    let r = frame.locator(".refresh.button");
+    if r.count().await.unwrap_or(0) > 0 {
+        return r.click(None).await.is_ok();
+    }
+    false
+}
+
+/// onnx 模式: 本地 CLIP 视觉求解 — 全离线。
+/// checkbox 由现有基建点过; 挑战出现后嗅探 getcaptcha → 分类 → 点击循环。
+async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<String, String> {
+    super::vision::ensure_engine()?;
+    watch_getcaptcha(page).await;
+
+    let js_token = "(() => { const t = document.querySelector('textarea[name=\"h-captcha-response\"], [name=\"g-recaptcha-response\"]'); return (t && t.value) ? t.value : ''; })()";
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    let mut last_fp = String::new();
+    let mut same_rounds = 0u32;
+
+    while tokio::time::Instant::now() < deadline {
+        // 1. 已有 token 直接返回 (答对后 challenge 关闭, token 落 textarea)
+        if let Ok(frames) = page.frames().await {
+            for f in &frames {
+                if let Ok(v) = f.evaluate::<Value>(js_token, None).await {
+                    if let Some(tok) = v.as_str() {
+                        if !tok.is_empty() {
+                            return Ok(tok.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. 无挑战数据 → 点 checkbox 等挑战弹出
+        let data = GETCAPTCHA.lock().unwrap().clone();
+        let Some(data) = data else {
+            try_click_hcaptcha_checkbox(page).await;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            continue;
+        };
+
+        // 3. 指纹去重 — 同一挑战不重复处理; 卡 15s 无变化则 refresh 换题
+        let fp = challenge_fingerprint(&data);
+        if fp == last_fp {
+            same_rounds += 1;
+            if same_rounds >= 15 {
+                refresh_challenge(page).await;
+                last_fp.clear();
+                same_rounds = 0;
+            } else {
+                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            }
+            continue;
+        }
+        last_fp = fp;
+        same_rounds = 0;
+
+        match solve_challenge_round(page, &data).await {
+            Ok(()) => {}
+            Err(e) => {
+                let _ = refresh_challenge(page).await;
+                last_fp.clear();
+                same_rounds = 0;
+                return Err(format!("vision round failed: {e}"));
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    Err("onnx 求解超时".into())
 }
 
 /// 重置上次注入 (对齐原版 _reset_hcaptcha_widget)。

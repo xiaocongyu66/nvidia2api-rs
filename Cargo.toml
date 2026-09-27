@@ -24,3 +24,5 @@ http = "1"
 include_dir = "0.7.4"
 playwright-rs = "0.18"
 bytes = "1"
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

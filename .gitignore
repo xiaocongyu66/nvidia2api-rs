@@ -7,3 +7,4 @@ embedded/admin-ui/*
 data/
 *.sqlite3*
 register/
+models/ort/*.tar.lzma2
