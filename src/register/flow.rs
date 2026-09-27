@@ -95,8 +95,15 @@ pub async fn register_one(
     log(&logf, &format!("[1] 邮箱: {email}"));
     let password = super::rand_password(12);
 
-    let pw = Playwright::launch().await.map_err(|e| format!("playwright launch: {e}"))?;
-    let browser = pw
+    let pw = match Playwright::launch().await {
+        Ok(v) => v,
+        Err(e) => {
+            let m = format!("[✗] playwright 启动失败: {e} (需安装 playwright 驱动与浏览器)");
+            log(&logf, m.clone());
+            return Err(m);
+        }
+    };
+    let browser = match pw
         .chromium()
         .launch_with_options(
             playwright_rs::LaunchOptions::new()
@@ -107,8 +114,22 @@ pub async fn register_one(
                 ]),
         )
         .await
-        .map_err(|e| format!("chromium launch: {e}"))?;
-    let page = browser.new_page().await.map_err(|e| format!("new_page: {e}"))?;
+    {
+        Ok(v) => v,
+        Err(e) => {
+            let m = format!("[✗] chromium 启动失败: {e} (需 playwright install chromium)");
+            log(&logf, m.clone());
+            return Err(m);
+        }
+    };
+    let page = match browser.new_page().await {
+        Ok(v) => v,
+        Err(e) => {
+            let m = format!("[✗] new_page 失败: {e}");
+            log(&logf, m.clone());
+            return Err(m);
+        }
+    };
 
     let result: Result<String, String> = async {
         // [2] build.nvidia.com
