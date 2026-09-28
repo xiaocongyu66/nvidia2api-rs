@@ -480,14 +480,36 @@ async fn watch_getcaptcha(page: &playwright_rs::Page) {
             if resp.url().contains("getcaptcha") {
                 println!("[vision] getcaptcha 响应捕获 status={}", resp.status());
                 match resp.body().await {
-                    Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
-                        Ok(v) => {
-                            let n = v["tasklist"].as_array().map(|a| a.len()).unwrap_or(0);
-                            println!("[vision] getcaptcha 解析成功 tasklist={n} prompt={:?}", extract_prompt(&v));
-                            *GETCAPTCHA.lock().unwrap() = Some(v);
+                    Ok(raw) => {
+                        let head: String = raw.iter().take(16).map(|b| format!("{b:02x}")).collect();
+                        println!("[vision] getcaptcha body len={} head={head}", raw.len());
+                        // 服务端有时返回 gzip 体 — 魔数 1f 8b
+                        let bytes: Vec<u8> = if raw.starts_with(&[0x1f, 0x8b]) {
+                            use std::io::Read;
+                            let mut d = flate2::read::GzDecoder::new(&raw[..]);
+                            let mut out = Vec::new();
+                            match d.read_to_end(&mut out) {
+                                Ok(_) => {
+                                    println!("[vision] gzip 解压成功 {}→{}B", raw.len(), out.len());
+                                    out
+                                }
+                                Err(e) => {
+                                    println!("[vision] gzip 解压失败: {e}");
+                                    raw
+                                }
+                            }
+                        } else {
+                            raw
+                        };
+                        match serde_json::from_slice::<Value>(&bytes) {
+                            Ok(v) => {
+                                let n = v["tasklist"].as_array().map(|a| a.len()).unwrap_or(0);
+                                println!("[vision] getcaptcha 解析成功 tasklist={n} prompt={:?}", extract_prompt(&v));
+                                *GETCAPTCHA.lock().unwrap() = Some(v);
+                            }
+                            Err(e) => println!("[vision] getcaptcha JSON 解析失败: {e}"),
                         }
-                        Err(e) => println!("[vision] getcaptcha JSON 解析失败: {e}"),
-                    },
+                    }
                     Err(e) => println!("[vision] getcaptcha body 读取失败: {e}"),
                 }
             }
