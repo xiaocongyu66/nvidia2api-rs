@@ -717,7 +717,13 @@ async fn fetch_tile_images(
 /// 处理一轮挑战: 路由题型 → 取图 → 分类 → 点 tile → 提交。
 /// 拖拽题走 drag::solve (canvas CV + 人类化拖拽), 网格题走 CLIP 分类。
 async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Result<(), String> {
-    let prompt = extract_prompt(data);
+    let mut prompt = extract_prompt(data);
+    if prompt.is_empty() {
+        // 加密响应轮次: prompt 拿不到, 画面可见 — 默认热食语义组 (最常见题型),
+        // 置信度低会走 refresh/多轮, 不至于完全躺平
+        println!("[vision] prompt 未知 (加密轮次), 默认 hot_food 语义组");
+        prompt = "Select items safe for a hot oven".to_string();
+    }
     if super::drag::route_drag(&prompt).is_some() {
         return solve_drag_round(page, &prompt).await;
     }
