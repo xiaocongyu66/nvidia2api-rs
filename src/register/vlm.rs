@@ -297,14 +297,14 @@ fn rect_outline(img: &mut RgbImage, x: i64, y: i64, w: i64, h: i64, color: [u8; 
         let tt = t as i64;
         for px in x..=(x + w) {
             for py in [y + tt, y + h - tt] {
-                if px >= 0 && py >= 0 && (px as u32) < iw && (py as u32) < ih {
+                if px >= 0 && py >= 0 && px < iw && py < ih {
                     img.put_pixel(px as u32, py as u32, image::Rgb(color));
                 }
             }
         }
         for py in y..=(y + h) {
             for px in [x + tt, x + w - tt] {
-                if px >= 0 && py >= 0 && (px as u32) < iw && (py as u32) < ih {
+                if px >= 0 && py >= 0 && px < iw && py < ih {
                     img.put_pixel(px as u32, py as u32, image::Rgb(color));
                 }
             }
