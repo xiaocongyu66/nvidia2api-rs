@@ -765,8 +765,12 @@ async fn capture_challenge_tiles(
     page: &playwright_rs::Page,
 ) -> Result<(Vec<(String, Vec<u8>)>, [f64; 5]), String> {
     let js = r#"(() => {
-        const fs = [...document.querySelectorAll('iframe')].filter(f =>
-            (f.src||'').includes('frame=challenge') || (f.src||'').includes('newassets.hcaptcha'));
+        const fs = [...document.querySelectorAll('iframe')].filter(f => {
+            if (!(f.src||'').includes('hcaptcha')) return false;
+            const r = f.getBoundingClientRect();
+            // challenge iframe 高度 >400; checkbox 只有 ~74 高
+            return r.width > 250 && r.height > 400;
+        });
         if (!fs.length) return null;
         let best = fs[0];
         for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
@@ -882,10 +886,13 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
     // 路线 B: 物理坐标
     println!("[vision] 点击路线 B: 物理坐标 (frame 树未 attach)");
     let js = r#"(() => {
-        const fs = [...document.querySelectorAll('iframe')].filter(f =>
-            (f.src||'').includes('frame=challenge') || (f.src||'').includes('newassets.hcaptcha'));
+        const fs = [...document.querySelectorAll('iframe')].filter(f => {
+            if (!(f.src||'').includes('hcaptcha')) return false;
+            const r = f.getBoundingClientRect();
+            // challenge iframe 高度 >400; checkbox 仅 ~74 高
+            return r.width > 250 && r.height > 400;
+        });
         if (!fs.length) return null;
-        // challenge iframe 通常是较宽的那个
         let best = fs[0];
         for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
         const r = best.getBoundingClientRect();
@@ -1113,7 +1120,8 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                         .evaluate::<Value, Value>(
                             r#"(() => {
                         const fs = [...document.querySelectorAll('iframe')].filter(f => (f.src||'').includes('hcaptcha'));
-                        return fs.some(f => f.getBoundingClientRect().width > 250);
+                        // challenge iframe 高度 >400 (checkbox 仅 ~74)
+                        return fs.some(f => { const r = f.getBoundingClientRect(); return r.width > 250 && r.height > 400; });
                     })()"#,
                             None,
                         )
