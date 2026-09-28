@@ -126,6 +126,8 @@ pub fn parse_proxy_line(line: &str) -> Option<(String, String, i64, String, Stri
     }
     let (protocol, rest) = if let Some(idx) = line.find("://") {
         let p = line[..idx].to_lowercase();
+        // 别名归一: hysteria2 → hy2
+        let p = if p == "hysteria2" { "hy2".to_string() } else { p };
         if !IMPORT_PROTOCOLS.contains(&p.as_str()) {
             return None;
         }
