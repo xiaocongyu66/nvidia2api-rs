@@ -121,16 +121,24 @@ pub async fn register_one(
         "--no-sandbox".to_string(),
         "--disable-blink-features=AutomationControlled".to_string(),
         "--lang=zh-CN".to_string(),
+        "--disable-dev-shm-usage".to_string(),
     ];
     if let Some(p) = crate::proxy_pool::chromium_proxy_arg() {
         log(&logf, &format!("[proxy] chromium 走代理: {p}"));
         args.push(p);
     }
+    // headed 真浏览器 (Xvfb 虚拟显示) — headless 的 UA/plugins/chrome 对象/permissions
+    // 全是可检测特征 (sannysoft 10 项 FAIL), headed 全 PASS。有 DISPLAY 即 headed。
+    let display = std::env::var("DISPLAY").is_ok();
+    let headless = !display && cfg.headless;
+    if display {
+        log(&logf, "[browser] Xvfb headed 模式 (真浏览器特征)");
+    }
     let browser = match pw
         .chromium()
         .launch_with_options(
             playwright_rs::LaunchOptions::new()
-                .headless(cfg.headless)
+                .headless(headless)
                 .args(args),
         )
         .await
