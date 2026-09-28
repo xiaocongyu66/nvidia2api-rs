@@ -304,8 +304,10 @@ pub fn set_enabled(proxy_id: i64, enabled: bool) -> Result<(), String> {
             .query_row("SELECT COUNT(*) FROM proxy WHERE enabled = 1", [], |r| r.get(0))
             .unwrap_or(0);
         let cap = crate::balancer::max_proxies_for_keys(keys.max(0) as usize) as i64;
-        if enabled_count >= cap.max(0) {
-            return Err(format!("proxy_limit: {enabled_count}/{cap} (N keys → N-1 proxies max)"));
+        // 保底 1 条: 注册机需要代理绕 IP 风控, 不能因 Key 池空而禁用代理
+        let cap = cap.max(1);
+        if enabled_count >= cap {
+            return Err(format!("proxy_limit: {enabled_count}/{cap} (N keys → N-1 proxies max, floor 1)"));
         }
     }
     let _ = &cfg;
