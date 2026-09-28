@@ -292,14 +292,20 @@ async fn inject_token(page: &playwright_rs::Page, token: &str) -> bool {
 }
 
 /// 自动点击 hCaptcha 复选框: 遍历页面所有 frame, 命中 #checkbox 即点。
+/// count 预探测防阻塞 — #checkbox 不存在时 click 会等到超时, 卡死求解循环。
 async fn try_click_hcaptcha_checkbox(page: &playwright_rs::Page) -> bool {
     let Ok(frames) = page.frames().await else {
         return false;
     };
     for frame in frames {
         let cb = frame.locator("#checkbox");
-        if cb.click(None).await.is_ok() {
-            return true;
+        if cb.count().await.unwrap_or(0) > 0 {
+            let opts = playwright_rs::protocol::ClickOptions::builder()
+                .timeout(3000.0)
+                .build();
+            if cb.click(Some(opts)).await.is_ok() {
+                return true;
+            }
         }
     }
     false
@@ -712,8 +718,12 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
         let Some(data) = data else {
             checkbox_ticks += 1;
             if checkbox_ticks % 5 == 1 {
-                let n_frames = page.frames().await.map(|f| f.len()).unwrap_or(0);
-                println!("[vision] 无挑战数据, 尝试点 checkbox (第{checkbox_ticks}次, 页面frames={n_frames})");
+                let urls: Vec<String> = page
+                    .frames()
+                    .await
+                    .map(|fs| fs.iter().map(|f| f.url().chars().take(70).collect()).collect())
+                    .unwrap_or_default();
+                println!("[vision] 无挑战数据, 点 checkbox (第{checkbox_ticks}次, frames={urls:?})");
             }
             try_click_hcaptcha_checkbox(page).await;
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
