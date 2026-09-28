@@ -1286,6 +1286,12 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
             Ok(()) => println!("[vision] 本轮点击+提交完成, 等待结果"),
             Err(e) => {
                 println!("[vision] 本轮失败: {e}");
+                // 高级语义推理题 (weight/mirror/puzzle 等风控高等级题型) 无法求解,
+                // refresh 换题大概率还是同池 — 立即止损, 不烧 180s 预算
+                if e.contains("unsupported prompt") {
+                    println!("[vision] 高级语义题型超出求解能力, 提前终止本账号");
+                    return Err("unsupported challenge type (风控高等级题型)".into());
+                }
                 let _ = refresh_challenge(page).await;
                 last_fp.clear();
                 same_rounds = 0;
