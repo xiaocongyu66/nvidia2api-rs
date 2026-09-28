@@ -4,6 +4,7 @@ pub mod captcha;
 pub mod drag;
 pub mod email;
 pub mod flow;
+pub mod stealth;
 pub mod vision;
 pub mod vlm;
 
@@ -268,7 +269,11 @@ pub fn start(count: u32) -> Result<(), String> {
                 }
             }
             if i < count {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                // IP 冷却节奏: 随机 15-45s (固定短间隔是风控特征)
+                use rand::Rng;
+                let gap = rand::thread_rng().gen_range(15..=45);
+                push_log(format!("冷却 {gap}s (IP 拟人节奏)"));
+                tokio::time::sleep(std::time::Duration::from_secs(gap)).await;
             }
         }
         push_log("===== 批次结束 =====".into());

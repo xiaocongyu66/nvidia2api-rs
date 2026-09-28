@@ -144,6 +144,8 @@ pub async fn register_one(
             return Err(m);
         }
     };
+    // 指纹伪装 — 降低 hCaptcha 风控等级 (明文轮比例↑)
+    let _ = page.add_init_script(super::stealth::STEALTH).await;
 
     let result: Result<String, String> = async {
         // [2] build.nvidia.com
