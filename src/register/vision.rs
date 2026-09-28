@@ -314,8 +314,8 @@ pub fn route_type(prompt: &str) -> Option<&'static str> {
     if p.contains("heat") && (p.contains("work") || p.contains("produce")) {
         return Some("heat_work");
     }
-    // 5. served hot
-    if p.contains("served hot") || (p.contains("hot") && p.contains("food")) {
+    // 5. 热食类 — prompt 变体: "served hot" / "safe for a hot oven" / "hot food"
+    if p.contains("hot") {
         return Some("hot_food");
     }
     // 6. hop/jump animals
