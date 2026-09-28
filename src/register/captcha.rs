@@ -722,6 +722,16 @@ async fn fetch_tile_images(
 
 /// 处理一轮挑战: 路由题型 → 取图 → 分类 → 点 tile → 提交。
 /// 拖拽题走 drag::solve (canvas CV + 人类化拖拽), 网格题走 CLIP 分类。
+/// VLM 截图区域缓存 (拖拽归一化坐标 → 页面坐标换算用)
+static VLM_REGION: Mutex<Option<[f64; 4]>> = Mutex::new(None);
+
+fn last_vlm_region() -> ((), [f64; 4]) {
+    (
+        (),
+        VLM_REGION.lock().unwrap().unwrap_or([0.0, 0.0, 480.0, 480.0]),
+    )
+}
+
 /// VLM 主路径 (gpt-pp-team 第 1 层): 整幅挑战图直出答案。
 /// 返回 None = VLM 未配置 (调用方落回 CLIP 启发式)。
 async fn vlm_solve_round(
@@ -769,8 +779,9 @@ async fn inner_vlm_solve(
     }
     if grid_png.is_none() {
         // canvas / 全页裁剪
-        if let Ok((png, _)) = capture_challenge_full(page).await {
+        if let Ok((png, rect)) = capture_challenge_full(page).await {
             println!("[vlm] 挑战图来源: 页面截图");
+            *VLM_REGION.lock().unwrap() = Some(rect);
             grid_png = Some(png);
         }
     }
@@ -778,11 +789,19 @@ async fn inner_vlm_solve(
         return Err("vlm 取挑战图失败".into());
     };
 
-    let indices = super::vlm::solve_grid(cfg, &png, prompt).await?;
-    if indices.is_empty() {
-        return Err("vlm 判定无匹配项".into());
+    match super::vlm::solve_adaptive(cfg, &png, prompt).await? {
+        Ok(indices) => {
+            if indices.is_empty() {
+                return Err("vlm 判定无匹配项".into());
+            }
+            click_tiles_and_submit(page, &indices).await
+        }
+        Err(((fx, fy), (tx, ty))) => {
+            // 拖拽: 归一化坐标 → iframe 像素坐标 (挑战图为裁剪区域)
+            let (_, [rx, ry, _, _]) = last_vlm_region();
+            human_drag(page, rx + fx * 480.0, ry + fy * 480.0, rx + tx * 480.0, ry + ty * 480.0).await
+        }
     }
-    click_tiles_and_submit(page, &indices).await
 }
 
 /// 9 张 tile bytes → 3x3 拼图 PNG (每张 160px, 整图 480x480)

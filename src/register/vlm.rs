@@ -153,7 +153,7 @@ pub async fn chat_completion(
             {"role": "system", "content": system},
             {"role": "user", "content": content},
         ],
-        "max_tokens": 1024,
+        "max_tokens": 3072,
     });
     if !claude {
         payload["response_format"] = serde_json::json!({"type": "json_object"});
@@ -198,7 +198,7 @@ pub async fn chat_completion(
             }
         };
         let raw = &v["choices"][0]["message"]["content"];
-        let content_text = if raw.is_array() {
+        let mut content_text = if raw.is_array() {
             raw.as_array()
                 .map(|a| {
                     a.iter()
@@ -210,6 +210,15 @@ pub async fn chat_completion(
         } else {
             raw.as_str().unwrap_or("").to_string()
         };
+        // reasoning 模型: content 耗尽为空时从 reasoning_content 提取结论 JSON
+        if extract_json_object(&content_text).is_none() {
+            if let Some(r) = v["choices"][0]["message"]["reasoning_content"].as_str() {
+                if let Some(js) = extract_json_object(r) {
+                    println!("[vlm] content 空, 从 reasoning 提取 JSON");
+                    content_text = js.to_string();
+                }
+            }
+        }
         if let Some(js) = extract_json_object(&content_text) {
             if let Ok(parsed) = serde_json::from_str::<Value>(js) {
                 return Ok(VlmDecision { parsed, raw_text: content_text });
@@ -478,19 +487,27 @@ pub async fn direct_drag(
     Ok((from, to))
 }
 
-/// 九宫格编号快速模式 (无候选框 overlay, 靠 grid 语义) → tile index 0-8
-pub async fn solve_grid(
+/// 题型自适应 VLM 求解 (网格/拖拽统一协议):
+/// 返回 Ok(Left(indices)) = 网格选中项; Ok(Right((from,to))) = 拖拽归一化坐标。
+pub async fn solve_adaptive(
     cfg: &VlmConfig,
     image_png: &[u8],
     prompt: &str,
-) -> Result<Vec<usize>, String> {
+) -> Result<Result<Vec<usize>, ((f64, f64), (f64, f64))>, String> {
+    let p = if prompt.is_empty() {
+        "(prompt text was not captured — read the challenge image yourself)".to_string()
+    } else {
+        format!("\"{prompt}\"")
+    };
     let instruction = format!(
-        "You are an hCaptcha solver. The image shows a 3x3 grid of tiles numbered 1-9 \
-         (row-major: 1 2 3 / 4 5 6 / 7 8 9, top-left = 1). \
-         Challenge prompt: \"{prompt}\". \
-         Decide which tiles match the prompt. Respond with ONLY a JSON object \
-         {{\"selected\": [tile numbers]}} — no markdown, no explanation. \
-         If nothing matches, respond {{\"selected\": []}}."
+        "You are an hCaptcha solver. The image shows one challenge. It is either \
+         (a) a 3x3 grid of tiles (number them 1-9 row-major, top-left = 1) or \
+         (b) a drag challenge (drag a piece/letter from its source to the target slot). \
+         Challenge prompt: {p}. If the prompt is unavailable, read it from the image. \
+         For a grid challenge respond ONLY: {{\"type\":\"grid\",\"selected\":[tile numbers]}} \
+         (empty list if nothing matches). \
+         For a drag challenge respond ONLY: {{\"type\":\"drag\",\"from\":[x,y],\"to\":[x,y]}} \
+         with normalized 0-1 coordinates. No markdown, no explanation."
     );
     let decision = chat_completion(
         cfg,
@@ -499,21 +516,38 @@ pub async fn solve_grid(
         &[image_png.to_vec()],
     )
     .await?;
-    let selected: Vec<usize> = decision.parsed["selected"]
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_u64())
-                .filter(|&n| (1..=9).contains(&n))
-                .map(|n| (n - 1) as usize)
-                .collect()
-        })
-        .unwrap_or_default();
-    println!(
-        "[vlm] 九宫格选择: {:?}",
-        selected.iter().map(|i| i + 1).collect::<Vec<_>>()
-    );
-    Ok(selected)
+    let t = decision.parsed["type"].as_str().unwrap_or("grid");
+    if t == "drag" {
+        let (w, h) = (480.0f64, 480.0f64);
+        let from = parse_point(
+            decision.parsed.get("from").unwrap_or(&Value::Null),
+            w,
+            h,
+        )?;
+        let to = parse_point(
+            decision.parsed.get("to").unwrap_or(&Value::Null),
+            w,
+            h,
+        )?;
+        println!("[vlm] 题型自适应: drag ({from:.2?}) → ({to:.2?})");
+        Ok(Err((from, to)))
+    } else {
+        let selected: Vec<usize> = decision.parsed["selected"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_u64())
+                    .filter(|&n| (1..=9).contains(&n))
+                    .map(|n| (n - 1) as usize)
+                    .collect()
+            })
+            .unwrap_or_default();
+        println!(
+            "[vlm] 题型自适应: grid {:?}",
+            selected.iter().map(|i| i + 1).collect::<Vec<_>>()
+        );
+        Ok(Ok(selected))
+    }
 }
 
 // ---------------------------------------------------------------------------
