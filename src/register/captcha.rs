@@ -1509,7 +1509,7 @@ pub async fn human_type(
     let keyboard = page.keyboard();
     for ch in text.chars() {
         keyboard
-            .press(ch.to_string(), None)
+            .press(ch.to_string().as_str(), None)
             .await
             .map_err(|e| format!("press: {e}"))?;
         let d = 40 + (rand::random::<f64>() * 90.0) as u64;
