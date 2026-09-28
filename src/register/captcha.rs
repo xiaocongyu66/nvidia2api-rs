@@ -801,6 +801,20 @@ async fn inner_vlm_solve(
         Err(e) => println!("[vlm] debug 图写入失败: {e}"),
     }
 
+    // 主路径: 候选框 overlay 模式 (gpt-pp-team 实证: 编号选择比坐标直出准)
+    // 3x3 网格天然 9 个候选 (G1-G9 row-major), 480x480 拼图或截图均适用
+    let overlay_result = try_vlm_overlay(cfg, &png, prompt).await;
+    match overlay_result {
+        Ok(Some(indices)) => {
+            if indices.is_empty() {
+                return Err("vlm 判定无匹配项".into());
+            }
+            return click_tiles_and_submit(page, &indices).await;
+        }
+        Ok(None) => {} // VLM 判非网格题, 落到题型自适应
+        Err(e) => println!("[vlm] overlay 模式失败: {e}, 落到题型自适应"),
+    }
+
     match super::vlm::solve_adaptive(cfg, &png, prompt).await? {
         Ok(indices) => {
             if indices.is_empty() {
@@ -814,6 +828,46 @@ async fn inner_vlm_solve(
             human_drag(page, rx + fx * 480.0, ry + fy * 480.0, rx + tx * 480.0, ry + ty * 480.0).await
         }
     }
+}
+
+/// 候选框 overlay 求解: 9 个 G 编号候选 → VLM 选 ID → tile indices。
+/// Ok(None) = VLM 判定不是网格挑战 (drag 等)。
+async fn try_vlm_overlay(
+    cfg: &super::vlm::VlmConfig,
+    png: &[u8],
+    prompt: &str,
+) -> Result<Option<Vec<usize>>, String> {
+    let img = image::load_from_memory(png)
+        .map_err(|e| format!("解码: {e}"))?
+        .to_rgb8();
+    let (w, h) = (img.width() as f64, img.height() as f64);
+    let mut candidates = Vec::new();
+    for idx in 0..9usize {
+        let col = (idx % 3) as f64;
+        let row = (idx / 3) as f64;
+        candidates.push(super::vlm::CandidateBox {
+            id: format!("G{}", idx + 1),
+            kind: "grid",
+            x: col * w / 3.0,
+            y: row * h / 3.0,
+            w: w / 3.0,
+            h: h / 3.0,
+        });
+    }
+    let ids = super::vlm::click_decision(cfg, &img, &candidates, prompt, "").await?;
+    if ids.is_empty() {
+        return Ok(None);
+    }
+    let mut indices = Vec::new();
+    for id in &ids {
+        if let Some(num) = id.strip_prefix('G').and_then(|n| n.parse::<usize>().ok()) {
+            if (1..=9).contains(&num) {
+                indices.push(num - 1);
+            }
+        }
+    }
+    println!("[vlm] overlay 模式选中: {indices:?}");
+    Ok(Some(indices))
 }
 
 /// 9 张 tile bytes → 3x3 拼图 PNG (每张 160px, 整图 480x480)
