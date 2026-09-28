@@ -1474,8 +1474,33 @@ async fn safe_mouse_move(
     Ok(())
 }
 
+/// 曲线移动 (human_drag 三段贝塞尔的泛化): 两个控制点带随机抖动,
+/// 每段独立 steps — 轨迹熵远高于 move_to 的线性插值。
+async fn bezier_move(
+    page: &playwright_rs::Page,
+    sx: f64,
+    sy: f64,
+    ex: f64,
+    ey: f64,
+) -> Result<(), String> {
+    // 控制点: 垂直于连线的随机偏移 (±30% 距离), 每次曲线不同
+    let dx = ex - sx;
+    let dy = ey - sy;
+    let dist = (dx * dx + dy * dy).sqrt().max(1.0);
+    let ox = -dy / dist;
+    let oy = dx / dist;
+    let w1 = (rand::random::<f64>() - 0.5) * dist * 0.6;
+    let w2 = (rand::random::<f64>() - 0.5) * dist * 0.4;
+    let (mx1, my1) = (sx + dx * 0.35 + ox * w1, sy + dy * 0.35 + oy * w1);
+    let (mx2, my2) = (sx + dx * 0.72 + ox * w2, sy + dy * 0.72 + oy * w2);
+    safe_mouse_move(page, mx1, my1, 10, 25).await?;
+    safe_mouse_move(page, mx2, my2, 12, 25).await?;
+    safe_mouse_move(page, ex, ey, 10, 45).await?;
+    Ok(())
+}
+
 /// 人类化点击 (公共, flow 表单交互用): bounding_box → 中心随机偏移 →
-/// 预悬停+悬停轨迹 → 物理 down/up (isTrusted)。失败回退不动 (调用方自行 locator.click 兜底)。
+/// 曲线轨迹移动 → 物理 down/up (isTrusted)。失败回退不动 (调用方自行 locator.click 兜底)。
 pub async fn human_click_locator(
     page: &playwright_rs::Page,
     loc: &playwright_rs::protocol::Locator,
@@ -1488,32 +1513,59 @@ pub async fn human_click_locator(
     // 命中点: 中心区域随机 (30%-70%), 避免每次都正中心
     let cx = b.x + b.width * (0.3 + rand::random::<f64>() * 0.4);
     let cy = b.y + b.height * (0.3 + rand::random::<f64>() * 0.4);
-    safe_mouse_move(page, cx - 26.0, cy - 15.0, 6, 30).await?;
-    safe_mouse_move(page, cx, cy, 8, 55).await?;
+    // 起点: 屏幕边缘一侧随机进入 (每页首次点击的起始位有自然差异)
+    let start_x = if rand::random::<bool>() { 8.0 } else { 1270.0 };
+    let start_y = 12.0 + rand::random::<f64>() * 80.0;
+    safe_mouse_move(page, start_x, start_y, 4, 20).await?;
+    bezier_move(page, start_x, start_y, cx, cy).await?;
     let mouse = page.mouse();
     mouse
         .down(None)
         .await
         .map_err(|e| format!("down: {e}"))?;
-    tokio::time::sleep(std::time::Duration::from_millis(85)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(70 + (rand::random::<f64>() * 60.0) as u64)).await;
     mouse.up(None).await.map_err(|e| format!("up: {e}"))?;
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(120 + (rand::random::<f64>() * 120.0) as u64)).await;
     Ok(())
 }
 
-/// 人类化打字: 逐字符 keyboard.type 带 40-130ms 随机延迟 (fill 是瞬间注入, 无键间隔熵)
+/// 人类化打字: 键间隔对数正态分布 (快慢混合+偶发思考停顿) + 5% 打错退格重打
+/// (均匀随机间隔可被卡方检验识破; fill 是瞬间注入, 无键间隔熵)
 pub async fn human_type(
     page: &playwright_rs::Page,
     text: &str,
 ) -> Result<(), String> {
     let keyboard = page.keyboard();
+    // 简易 Box-Muller: 正态随机 → exp() = 对数正态间隔 (中位 75ms, 长尾到 ~400ms)
+    let lognormal_ms = || -> u64 {
+        let u1 = rand::random::<f64>().max(1e-9);
+        let u2 = rand::random::<f64>();
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+        (75.0 * (0.55 * z).exp()).clamp(28.0, 420.0) as u64
+    };
     for ch in text.chars() {
+        // 5% 打错: 随机相邻键 → 停顿 → Backspace → 正确字符
+        if rand::random::<f64>() < 0.05 {
+            let wrong = if ch.is_ascii_alphabetic() {
+                ((b'a' + rand::random::<u8>() % 26) as char).to_string()
+            } else {
+                ((b'0' + rand::random::<u8>() % 10) as char).to_string()
+            };
+            if keyboard.press(wrong.as_str(), None).await.is_ok() {
+                tokio::time::sleep(std::time::Duration::from_millis(180 + lognormal_ms() / 2)).await;
+                let _ = keyboard.press("Backspace", None).await;
+                tokio::time::sleep(std::time::Duration::from_millis(90 + lognormal_ms() / 3)).await;
+            }
+        }
         keyboard
             .press(ch.to_string().as_str(), None)
             .await
             .map_err(|e| format!("press: {e}"))?;
-        let d = 40 + (rand::random::<f64>() * 90.0) as u64;
-        tokio::time::sleep(std::time::Duration::from_millis(d)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(lognormal_ms())).await;
+        // 3% 概率思考停顿 (300-800ms)
+        if rand::random::<f64>() < 0.03 {
+            tokio::time::sleep(std::time::Duration::from_millis(300 + (rand::random::<f64>() * 500.0) as u64)).await;
+        }
     }
     Ok(())
 }
