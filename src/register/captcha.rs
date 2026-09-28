@@ -291,20 +291,59 @@ async fn inject_token(page: &playwright_rs::Page, token: &str) -> bool {
     false
 }
 
-/// 自动点击 hCaptcha 复选框: 遍历页面所有 frame, 命中 #checkbox 即点。
-/// count 预探测防阻塞 — #checkbox 不存在时 click 会等到超时, 卡死求解循环。
+/// 自动点击 hCaptcha 复选框 — 三级路线。
+/// playwright-rs 的 frame 树对动态插入的 cross-origin iframe 不同步 (实测 frames 恒为 1),
+/// 因此不能依赖 page.frames() 找 checkbox frame:
+/// 1. window.hcaptcha.execute() — hCaptcha 官方 JS API, 程序化触发验证
+/// 2. 鼠标物理点击 checkbox iframe 中心 (主 frame DOM 拿 bounding rect)
+/// 3. frame 遍历兜底 (iframe 已 attach 的场景)
 async fn try_click_hcaptcha_checkbox(page: &playwright_rs::Page) -> bool {
-    let Ok(frames) = page.frames().await else {
-        return false;
-    };
-    for frame in frames {
-        let cb = frame.locator("#checkbox");
-        if cb.count().await.unwrap_or(0) > 0 {
-            let opts = playwright_rs::protocol::ClickOptions::builder()
-                .timeout(3000.0)
-                .build();
-            if cb.click(Some(opts)).await.is_ok() {
-                return true;
+    // 路线 1: hCaptcha JS API
+    let js_execute = "(() => { if (window.hcaptcha && typeof hcaptcha.execute === 'function') { try { hcaptcha.execute(); return 'executed'; } catch(e) { return 'err'; } } return 'no-api'; })()";
+    if let Ok(v) = page.evaluate::<Value, Value>(js_execute, None).await {
+        if v.as_str() == Some("executed") {
+            println!("[vision] checkbox: hcaptcha.execute() 触发");
+            return true;
+        }
+    }
+
+    // 路线 2: 鼠标点击 checkbox iframe 中心
+    let js_rect = r#"(() => {
+        const fs = [...document.querySelectorAll('iframe')].filter(f => (f.src||'').includes('hcaptcha'));
+        if (!fs.length) return null;
+        // checkbox iframe 通常在前, 且 URL 含 frame=checkbox
+        const cb = fs.find(f => (f.src||'').includes('frame=checkbox')) || fs[0];
+        const r = cb.getBoundingClientRect();
+        if (r.width <= 0) return null;
+        return JSON.stringify([r.x, r.y, r.width, r.height]);
+    })()"#;
+    if let Ok(v) = page.evaluate::<Value, Value>(js_rect, None).await {
+        if let Some(s) = v.as_str() {
+            if let Ok(arr) = serde_json::from_str::<Vec<f64>>(s) {
+                if arr.len() == 4 && arr[2] > 10.0 {
+                    let (x, y, w, h) = (arr[0], arr[1], arr[2], arr[3]);
+                    let mouse = page.mouse();
+                    let opts = playwright_rs::protocol::MouseOptions::default();
+                    if mouse.click(x + w / 2.0, y + h / 2.0, Some(opts)).await.is_ok() {
+                        println!("[vision] checkbox: 鼠标点击 iframe 中心 ({:.0},{:.0})", x + w / 2.0, y + h / 2.0);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    // 路线 3: frame 遍历兜底
+    if let Ok(frames) = page.frames().await {
+        for frame in frames {
+            let cb = frame.locator("#checkbox");
+            if cb.count().await.unwrap_or(0) > 0 {
+                let opts = playwright_rs::protocol::ClickOptions::builder()
+                    .timeout(3000.0)
+                    .build();
+                if cb.click(Some(opts)).await.is_ok() {
+                    return true;
+                }
             }
         }
     }
