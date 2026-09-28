@@ -792,8 +792,14 @@ async fn inner_vlm_solve(
     // debug: VLM 实际看到的挑战图 (人工核对答题质量)
     let dir = std::path::Path::new("data/debug");
     let _ = std::fs::create_dir_all(dir);
-    let _ = std::fs::write(dir.join("vlm_grid.png"), &png);
-    println!("[vlm] debug 图已存: data/debug/vlm_grid.png");
+    let path = dir.join("vlm_grid.png");
+    match std::fs::write(&path, &png) {
+        Ok(()) => println!(
+            "[vlm] debug 图已存: {}",
+            path.canonicalize().map(|p| p.display().to_string()).unwrap_or_default()
+        ),
+        Err(e) => println!("[vlm] debug 图写入失败: {e}"),
+    }
 
     match super::vlm::solve_adaptive(cfg, &png, prompt).await? {
         Ok(indices) => {

@@ -516,6 +516,10 @@ pub async fn solve_adaptive(
         &[image_png.to_vec()],
     )
     .await?;
+    println!(
+        "[vlm] 原始回答: {}",
+        decision.raw_text.chars().take(150).collect::<String>()
+    );
     let t = decision.parsed["type"].as_str().unwrap_or("grid");
     if t == "drag" {
         let (w, h) = (480.0f64, 480.0f64);
