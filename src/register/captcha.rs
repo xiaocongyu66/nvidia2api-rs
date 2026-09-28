@@ -961,31 +961,32 @@ async fn capture_challenge_full(
         Some((buf.into_inner(), pw, ph))
     };
 
-    // 路径 1: 全页截图裁剪
+    // 路径 1: iframe 元素级截图 (light DOM locator) — CDP 对元素节点截图,
+    // 跨域合成层内容保真, 坐标自动 1:1 (全页截图会丢跨域层/混入登录页背景)
+    let loc = page
+        .locator("iframe[src*='hcaptcha']")
+        .nth(0);
+    if let Ok(png) = loc.screenshot(None).await {
+        if let Ok((px, pw, ph)) = super::drag::decode_png(&png) {
+            if !raster_is_empty(&px) {
+                println!("[vlm] 元素截图成功 ({pw}x{ph})");
+                return Ok((png, [rx, ry, rw, rh]));
+            }
+            println!("[vlm] 元素截图空图 ({pw}x{ph}), 回退全页裁剪");
+        }
+    }
+
+    // 路径 2: 全页截图裁剪 (回退)
     if let Ok(png) = page.screenshot(None).await {
         if let Some((cropped, pw, ph)) = crop_from(&png) {
             let (px, _, _) = super::drag::decode_png(&cropped)?;
             if !raster_is_empty(&px) {
                 return Ok((cropped, [rx, ry, rw, rh]));
             }
-            println!("[vlm] 全页截图空图 (均值/方差检测), 回退元素截图 ({pw}x{ph})");
+            println!("[vlm] 全页截图空图 ({pw}x{ph})");
         }
     }
-
-    // 路径 2: iframe 元素级截图 (light DOM locator)
-    let loc = page
-        .locator("iframe[src*='hcaptcha']")
-        .nth(0);
-    let png = loc
-        .screenshot(None)
-        .await
-        .map_err(|e| format!("元素截图: {e}"))?;
-    let (px, pw, ph) = super::drag::decode_png(&png)?;
-    if raster_is_empty(&px) {
-        return Err(format!("元素截图也是空图 ({pw}x{ph})"));
-    }
-    println!("[vlm] 元素截图成功 ({pw}x{ph})");
-    Ok((png, [rx, ry, rw, rh]))
+    Err("取挑战图失败 (元素与全页均空/失败)".into())
 }
 
 async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Result<(), String> {
