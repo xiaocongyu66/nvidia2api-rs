@@ -350,6 +350,51 @@ mod tests {
         assert_eq!(route_type("drag the missing piece into place"), None);
         assert_eq!(route_type("Please click on the object that can float on water"), Some("float_on_water"));
         assert_eq!(route_type("click the item that is served hot"), Some("hot_food"));
+    }
+
+    /// 诊断: 已知题型图片 × 全部语义组的得分矩阵 (cargo test 时人工判读)
+    #[test]
+    fn probe_scores_matrix() {
+        let files = [
+            ("boat", "model/test/boat.jpg"),
+            ("icecream", "model/test/icecream.jpg"),
+            ("fries", "model/test/fries.jpg"),
+        ];
+        if files.iter().any(|(_, p)| std::fs::metadata(p).is_err()) {
+            eprintln!("测试图缺失, 跳过");
+            return;
+        }
+        let tiles: Vec<(String, Vec<u8>)> = files
+            .iter()
+            .map(|(n, p)| (n.to_string(), std::fs::read(p).expect(p)))
+            .collect();
+        ensure_engine().expect("engine");
+        let embeds = embed_images(&tiles).expect("embed");
+        for key in [
+            "water_travel",
+            "float_on_water",
+            "hot_food",
+            "heat_work",
+            "hop_animals",
+            "shiny_thing",
+            "kept_outside",
+            "dissolve_melt",
+        ] {
+            if let Ok(scores) = classify(key, &embeds) {
+                let row: Vec<String> = files
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (n, _))| {
+                        format!("{n}: pos={:.2} neg={:.2}", scores[i].positive_score, scores[i].negative_score)
+                    })
+                    .collect();
+                println!("[{key}] {}", row.join(" | "));
+            }
+        }
+    }
+
+    #[test]
+    fn route_type_secondary_pairs() {
         assert_eq!(route_type("select the shiny thing"), Some("shiny_thing"));
         assert_eq!(route_type("pick the item typically kept outside"), Some("kept_outside"));
         assert_eq!(route_type("click each object that can dissolve or melt in water"), Some("dissolve_melt"));
