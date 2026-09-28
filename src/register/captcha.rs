@@ -962,6 +962,33 @@ async fn solve_drag_round(page: &playwright_rs::Page, prompt: &str) -> Result<()
     println!("[vision] drag 画布: 截图{pw}x{ph} rect=({:.0},{:.0},{:.0}x{:.0})", rect.x, rect.y, rect.width, rect.height);
     let sol = super::drag::solve(prompt, &px, pw, ph)?;
 
+    // debug: 每进程存一次 canvas 原图 + from/to 十字标注
+    if !DEBUG_SAVED.swap(true, Ordering::Relaxed) {
+        let dir = std::path::Path::new("data/debug");
+        let _ = std::fs::create_dir_all(dir);
+        let mut img = px.clone();
+        let cross = |img: &mut [u8], cx: f64, cy: f64, rgb: [u8; 3]| {
+            let (cx, cy) = (cx as isize, cy as isize);
+            for d in -12..=12isize {
+                for (dx, dy) in [(d, 0isize), (0isize, d)] {
+                    let (x, y) = (cx + dx, cy + dy);
+                    if x >= 0 && y >= 0 && (x as usize) < pw && (y as usize) < ph {
+                        let i = (y as usize * pw + x as usize) * 3;
+                        img[i] = rgb[0];
+                        img[i + 1] = rgb[1];
+                        img[i + 2] = rgb[2];
+                    }
+                }
+            }
+        };
+        cross(&mut img, sol.from.0, sol.from.1, [255, 0, 0]);
+        cross(&mut img, sol.to.0, sol.to.1, [0, 100, 255]);
+        if let Some(v) = image::RgbImage::from_raw(pw as u32, ph as u32, img) {
+            let _ = v.save(dir.join("drag_canvas.png"));
+            println!("[vision] debug 图已存: data/debug/drag_canvas.png (红=from 蓝=to)");
+        }
+    }
+
     // 截图像素 → 页面坐标 (等比换算)
     let scale = rect.width / pw as f64;
     let sx = rect.x + sol.from.0 * scale;
