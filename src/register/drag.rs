@@ -67,12 +67,12 @@ fn dilate(mask: &[bool], w: usize, h: usize, k: usize) -> Vec<bool> {
         for x in 0..w {
             let mut any = false;
             'outer: for dy in 0..k {
-                let sy = y + dy as isize - r as isize;
+                let sy = y as isize + dy as isize - r as isize;
                 if sy < 0 || sy >= h as isize {
                     continue;
                 }
                 for dx in 0..k {
-                    let sx = x + dx as isize - r as isize;
+                    let sx = x as isize + dx as isize - r as isize;
                     if sx < 0 || sx >= w as isize {
                         continue;
                     }
