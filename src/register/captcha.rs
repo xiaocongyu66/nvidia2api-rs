@@ -1491,9 +1491,12 @@ pub async fn human_click_locator(
     safe_mouse_move(page, cx - 26.0, cy - 15.0, 6, 30).await?;
     safe_mouse_move(page, cx, cy, 8, 55).await?;
     let mouse = page.mouse();
-    mouse.down().await.map_err(|e| format!("down: {e}"))?;
+    mouse
+        .down(None)
+        .await
+        .map_err(|e| format!("down: {e}"))?;
     tokio::time::sleep(std::time::Duration::from_millis(85)).await;
-    mouse.up().await.map_err(|e| format!("up: {e}"))?;
+    mouse.up(None).await.map_err(|e| format!("up: {e}"))?;
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
     Ok(())
 }
