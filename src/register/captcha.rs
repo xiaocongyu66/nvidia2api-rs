@@ -3,6 +3,7 @@
 //! 事件回调全部写静态变量 (注册流程单浏览器串行, 无并发冲突), 避免闭包捕获的生命周期问题。
 
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 pub struct SolverConfig {
@@ -30,6 +31,8 @@ static GETCAPTCHA: Mutex<Option<Value>> = Mutex::new(None);
 static REGISTER_STATUS: Mutex<Option<u16>> = Mutex::new(None);
 /// 截图模式最近一次的网格参数 [rx, ry, gx, gy, tile] — 点击路线 B 与切图同坐标系
 static LAST_GRID: Mutex<Option<[f64; 5]>> = Mutex::new(None);
+/// debug 存图只做一次
+static DEBUG_SAVED: AtomicBool = AtomicBool::new(false);
 
 pub fn reset_sitekey() {
     *SITEKEY.lock().unwrap() = None;
@@ -813,6 +816,16 @@ async fn capture_challenge_tiles(
             (20.0, 90.0, g)
         }
     };
+
+    // debug: 每进程存一次 iframe 裁剪原图 + 一张切图, 供人工校准
+    if !DEBUG_SAVED.swap(true, Ordering::Relaxed) {
+        let dir = std::path::Path::new("data/debug");
+        let _ = std::fs::create_dir_all(dir);
+        if let Ok(im) = image::RgbImage::from_raw(cw as u32, ch as u32, cpx.clone()) {
+            let _ = im.save(dir.join("iframe_crop.png"));
+            println!("[vision] debug 图已存: data/debug/iframe_crop.png ({}x{})", cw, ch);
+        }
+    }
     let grid = [rx, ry, gx, gy, gt];
 
     let crop_img = image::RgbImage::from_raw(cw as u32, ch as u32, cpx).ok_or("裁剪重建失败")?;
