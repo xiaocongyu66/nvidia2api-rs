@@ -1474,6 +1474,47 @@ async fn safe_mouse_move(
     Ok(())
 }
 
+/// 人类化点击 (公共, flow 表单交互用): bounding_box → 中心随机偏移 →
+/// 预悬停+悬停轨迹 → 物理 down/up (isTrusted)。失败回退不动 (调用方自行 locator.click 兜底)。
+pub async fn human_click_locator(
+    page: &playwright_rs::Page,
+    loc: &playwright_rs::protocol::Locator,
+) -> Result<(), String> {
+    let b = loc
+        .bounding_box()
+        .await
+        .map_err(|e| format!("bounding_box: {e}"))?
+        .ok_or("bounding_box None")?;
+    // 命中点: 中心区域随机 (30%-70%), 避免每次都正中心
+    let cx = b.x + b.width * (0.3 + rand::random::<f64>() * 0.4);
+    let cy = b.y + b.height * (0.3 + rand::random::<f64>() * 0.4);
+    safe_mouse_move(page, cx - 26.0, cy - 15.0, 6, 30).await?;
+    safe_mouse_move(page, cx, cy, 8, 55).await?;
+    let mouse = page.mouse();
+    mouse.down().await.map_err(|e| format!("down: {e}"))?;
+    tokio::time::sleep(std::time::Duration::from_millis(85)).await;
+    mouse.up().await.map_err(|e| format!("up: {e}"))?;
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    Ok(())
+}
+
+/// 人类化打字: 逐字符 keyboard.type 带 40-130ms 随机延迟 (fill 是瞬间注入, 无键间隔熵)
+pub async fn human_type(
+    page: &playwright_rs::Page,
+    text: &str,
+) -> Result<(), String> {
+    let keyboard = page.keyboard();
+    for ch in text.chars() {
+        keyboard
+            .press(ch.to_string(), None)
+            .await
+            .map_err(|e| format!("press: {e}"))?;
+        let d = 40 + (rand::random::<f64>() * 90.0) as u64;
+        tokio::time::sleep(std::time::Duration::from_millis(d)).await;
+    }
+    Ok(())
+}
+
 async fn human_drag(
     page: &playwright_rs::Page,
     sx: f64,

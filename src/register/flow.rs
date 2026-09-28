@@ -222,21 +222,27 @@ pub async fn register_one(
             }
         };
 
-        // [4] 提交邮箱 → Next (iframe 内)
+        // [4] 提交邮箱 → Next (iframe 内) — 人类化: 轨迹点击 + 逐字打字
         log(&logf, "[4] 提交邮箱…");
         captcha::ensure_hcaptcha_hook(&page).await;
         let email_input = form_frame.locator("input[name=\"email\"]").first();
-        let _ = email_input.click(None).await;
-        let _ = email_input.press_sequentially(&email, None).await;
+        if captcha::human_click_locator(&page, &email_input).await.is_err() {
+            let _ = email_input.click(None).await;
+        }
+        if captcha::human_type(&page, &email).await.is_err() {
+            let _ = email_input.press_sequentially(&email, None).await;
+        }
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         let next_btn = form_frame.get_by_role(AriaRole::Button, Some(GetByRoleOptions::default().name("Next")));
         if next_btn.count().await.unwrap_or(0) == 0 {
             return Err("Next button not found".into());
         }
-        let _ = next_btn.first().click(None).await;
+        if captcha::human_click_locator(&page, &next_btn.first()).await.is_err() {
+            let _ = next_btn.first().click(None).await;
+        }
         tokio::time::sleep(std::time::Duration::from_secs(4)).await;
 
-        // [5] 填密码 (iframe 内)
+        // [5] 填密码 (iframe 内) — 人类化打字
         log(&logf, "[5] 填写密码…");
         let deadline = now() + std::time::Duration::from_secs(30);
         let mut appeared = false;
@@ -250,8 +256,20 @@ pub async fn register_one(
         if !appeared {
             return Err("password field never appeared".into());
         }
-        let _ = form_frame.locator("#registration_password").fill(&password, None).await;
-        let _ = form_frame.locator("#registration_passwordConfirm").fill(&password, None).await;
+        let pw_input = form_frame.locator("#registration_password").first();
+        if captcha::human_click_locator(&page, &pw_input).await.is_err() {
+            let _ = pw_input.click(None).await;
+        }
+        if captcha::human_type(&page, &password).await.is_err() {
+            let _ = pw_input.fill(&password, None).await;
+        }
+        let pw_confirm = form_frame.locator("#registration_passwordConfirm").first();
+        if captcha::human_click_locator(&page, &pw_confirm).await.is_err() {
+            let _ = pw_confirm.click(None).await;
+        }
+        if captcha::human_type(&page, &password).await.is_err() {
+            let _ = pw_confirm.fill(&password, None).await;
+        }
 
         // [6] hCaptcha + 提交 (最多 3 次重试, 监听 register 响应)
         let mut accepted = false;
