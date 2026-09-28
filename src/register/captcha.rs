@@ -613,7 +613,7 @@ async fn download_tile(client: &reqwest::Client, url: &str, ua: &str) -> Option<
     None
 }
 
-/// 取 9 张 tile 图 — 三级来源: getcaptcha tasklist → background-image CSS → 元素截图。
+/// 取 9 张 tile 图 — 多级来源: tasklist → 全页截图切图 → CSS → 元素截图。
 async fn fetch_tile_images(
     page: &playwright_rs::Page,
     data: &Value,
@@ -646,7 +646,13 @@ async fn fetch_tile_images(
             println!("[vision] tile 来源: getcaptcha tasklist ({}张)", out.len());
             return Ok(out);
         }
-        println!("[vision] tasklist 下载失败, 降级 CSS 来源");
+        println!("[vision] tasklist 下载失败, 降级");
+    }
+
+    // 来源 1.5: 全页截图切 3x3 (不依赖 challenge frame — 加密响应时的主力)
+    if let Ok(tiles) = capture_challenge_tiles(page).await {
+        println!("[vision] tile 来源: 页面截图 ({}张)", tiles.len());
+        return Ok(tiles);
     }
 
     // 来源 2: challenge frame 里 .task-image .image 的 background-image CSS
@@ -737,6 +743,69 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
     };
     println!("[vision] 点击集1: {set:?} (共{}套候选)", sets.len());
     click_tiles_and_submit(page, &set).await
+}
+
+/// 截图模式取 tile — 嗅探器被封 (加密响应) 时的兜底取图:
+/// challenge iframe 在主 DOM 的 light DOM (实测), 拿 bounding rect →
+/// Page::screenshot 全页 PNG → 裁 iframe 区域 → 按标准网格布局切 3x3。
+/// 坐标系与路线 B (物理点击) 完全一致。
+async fn capture_challenge_tiles(page: &playwright_rs::Page) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let js = r#"(() => {
+        const fs = [...document.querySelectorAll('iframe')].filter(f =>
+            (f.src||'').includes('frame=challenge') || (f.src||'').includes('newassets.hcaptcha'));
+        if (!fs.length) return null;
+        let best = fs[0];
+        for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
+        const r = best.getBoundingClientRect();
+        return JSON.stringify([r.x, r.y, r.width, r.height]);
+    })()"#;
+    let v = page
+        .evaluate::<Value, Value>(js, None)
+        .await
+        .map_err(|e| format!("iframe rect: {e}"))?;
+    let s = v.as_str().ok_or("challenge iframe 未找到 (截图模式)")?;
+    let arr: Vec<f64> = serde_json::from_str(s).map_err(|e| format!("rect 解析: {e}"))?;
+    if arr.len() != 4 {
+        return Err("rect 数据不完整".into());
+    }
+    let (rx, ry, rw, rh) = (arr[0], arr[1], arr[2], arr[3]);
+
+    let png = page
+        .screenshot(None)
+        .await
+        .map_err(|e| format!("全页截图: {e}"))?;
+    let (px, pw, ph) = super::drag::decode_png(&png)?;
+    println!("[vision] 截图模式: 页面{pw}x{ph} iframe=({rx:.0},{ry:.0} {rw:.0}x{rh:.0})");
+    let img = image::RgbImage::from_raw(pw as u32, ph as u32, px).ok_or("页面图重建失败")?;
+
+    // 网格布局常量 (与路线 B 一致)
+    let pad = 20.0;
+    let top = 90.0;
+    let tile_w = (rw - 2.0 * pad) / 3.0;
+    let mut out = Vec::new();
+    for idx in 0..9usize {
+        let col = (idx % 3) as f64;
+        let row = (idx / 3) as f64;
+        let x0 = (rx + pad + col * tile_w).clamp(0.0, pw as f64 - 1.0) as u32;
+        let y0 = (ry + top + row * tile_w).clamp(0.0, ph as f64 - 1.0) as u32;
+        let tw = tile_w.min(pw as f64 - x0 as f64) as u32;
+        let th = tile_w.min(ph as f64 - y0 as f64) as u32;
+        if tw < 10 || th < 10 {
+            continue;
+        }
+        let sub = image::imageops::crop_imm(&img, x0, y0, tw, th).to_image();
+        let mut buf = std::io::Cursor::new(Vec::new());
+        if sub
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .is_ok()
+        {
+            out.push((format!("shot-{idx}"), buf.into_inner()));
+        }
+    }
+    if out.is_empty() {
+        return Err("截图模式切图失败".into());
+    }
+    Ok(out)
 }
 
 /// 点击 tile + 提交 — 两级路线:
@@ -982,6 +1051,28 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                     }))()"#;
                     if let Ok(v) = page.evaluate::<Value, Value>(js, None).await {
                         println!("[vision] DOM 探针: {v}");
+                    }
+                }
+                // 加密响应轮次: 槽空但挑战画面存在 → 截图模式直接分类
+                // (prompt 未知, 先用最常见的热食语义组; 置信度低会走 refresh 换题)
+                if checkbox_ticks % 3 == 0 {
+                    let challenge_visible = page
+                        .evaluate::<Value, Value>(
+                            r#"(() => {
+                        const fs = [...document.querySelectorAll('iframe')].filter(f => (f.src||'').includes('hcaptcha'));
+                        return fs.some(f => f.getBoundingClientRect().width > 250);
+                    })()"#,
+                        )
+                        .await
+                        .map(|v| v.as_bool().unwrap_or(false))
+                        .unwrap_or(false);
+                    if challenge_visible {
+                        println!("[vision] 加密轮次检测到挑战画面, 截图模式求解");
+                        let placeholder = serde_json::json!({"tasklist": []});
+                        match solve_challenge_round(page, &placeholder).await {
+                            Ok(()) => println!("[vision] 加密轮次截图求解完成"),
+                            Err(e) => println!("[vision] 加密轮次求解失败: {e}"),
+                        }
                     }
                 }
             }
