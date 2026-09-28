@@ -821,7 +821,7 @@ async fn capture_challenge_tiles(
     if !DEBUG_SAVED.swap(true, Ordering::Relaxed) {
         let dir = std::path::Path::new("data/debug");
         let _ = std::fs::create_dir_all(dir);
-        if let Ok(im) = image::RgbImage::from_raw(cw as u32, ch as u32, cpx.clone()) {
+        if let Some(im) = image::RgbImage::from_raw(cw as u32, ch as u32, cpx.clone()) {
             let _ = im.save(dir.join("iframe_crop.png"));
             println!("[vision] debug 图已存: data/debug/iframe_crop.png ({}x{})", cw, ch);
         }
