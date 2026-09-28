@@ -263,7 +263,10 @@ const PALETTE: [[u8; 3]; 6] = [
 ];
 
 fn draw_glyph(img: &mut RgbImage, ch: char, x0: i64, y0: i64, color: [u8; 3]) {
-    let g = GLYPHS.iter().find(|(c, _)| *c == ch).map(|(_, g)| g);
+    let g = GLYPHS
+        .iter()
+        .find(|(c, _)| c.chars().next() == Some(ch))
+        .map(|(_, g)| g);
     if let Some(rows) = g {
         for (ry, &row) in rows.iter().enumerate() {
             for col in 0..5 {
@@ -458,22 +461,20 @@ pub async fn direct_drag(
         .write_to(&mut std::io::Cursor::new(&mut abuf), image::ImageFormat::Png)
         .map_err(|e| format!("原图编码: {e}"))?;
     let decision = chat_completion(cfg, system, &user, &[abuf]).await?;
-    let from = parse_point(
-        decision
-            .parsed
-            .get("drag_from")
-            .or_else(|| decision.parsed.get("source_point")),
-        width,
-        height,
-    )?;
-    let to = parse_point(
-        decision
-            .parsed
-            .get("drag_to")
-            .or_else(|| decision.parsed.get("target_point")),
-        width,
-        height,
-    )?;
+    let from_v = decision
+        .parsed
+        .get("drag_from")
+        .cloned()
+        .or_else(|| decision.parsed.get("source_point").cloned())
+        .unwrap_or(Value::Null);
+    let to_v = decision
+        .parsed
+        .get("drag_to")
+        .cloned()
+        .or_else(|| decision.parsed.get("target_point").cloned())
+        .unwrap_or(Value::Null);
+    let from = parse_point(&from_v, width, height)?;
+    let to = parse_point(&to_v, width, height)?;
     Ok((from, to))
 }
 
