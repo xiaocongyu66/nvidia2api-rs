@@ -75,5 +75,7 @@ async fn main() {
     let addr = format!("0.0.0.0:{}", cfg.port);
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
     eprintln!("[nvidia2api-rs] listening on {addr} (data: {})", storage::db_path().display());
+    // 启动预热: 拉起所有 enabled 隧道的本地 mixed 监听
+    tokio::spawn(async { crate::proxy_pool::prewarm_tunnels(); });
     axum::serve(listener, app).await.expect("serve");
 }

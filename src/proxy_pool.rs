@@ -75,6 +75,18 @@ pub fn chromium_proxy_arg() -> Option<String> {
     None
 }
 
+/// 服务启动预热: 拉起所有 enabled 隧道的本地 mixed 监听
+/// (否则服务重启后监听丢失, 需等下一次 check/批次才恢复)。
+pub fn prewarm_tunnels() {
+    for p in list_all() {
+        if p.enabled && is_tunnel_protocol(&p.protocol) {
+            if let Some(port) = tunnel_port_for(&p) {
+                eprintln!("[tunnel] 预热 {} -> 127.0.0.1:{port}", p.name);
+            }
+        }
+    }
+}
+
 fn row_to_proxy(r: &rusqlite::Row) -> rusqlite::Result<Proxy> {
     Ok(Proxy {
         id: r.get("id")?,
