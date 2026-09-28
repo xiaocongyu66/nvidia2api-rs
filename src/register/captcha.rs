@@ -753,7 +753,7 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                         registerBtn: !!document.querySelector('#register_button'),
                         passwordFilled: !!document.querySelector('#registration_password'),
                     }))()"#;
-                    if let Ok(v) = page.evaluate::<Value>(js, None).await {
+                    if let Ok(v) = page.evaluate::<Value, Value>(js, None).await {
                         println!("[vision] DOM 探针: {v}");
                     }
                 }
