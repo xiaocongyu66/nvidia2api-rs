@@ -108,7 +108,7 @@ fn connected_components(mask: &[bool], w: usize, h: usize, min_area: usize) -> V
             pixels.push(p);
             let px = p % w;
             let py = p / w;
-            for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] {
+            for (dx, dy) in [(1isize, 0isize), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)] {
                 let nx = px as isize + dx;
                 let ny = py as isize + dy;
                 if nx < 0 || ny < 0 || nx >= w as isize || ny >= h as isize {
