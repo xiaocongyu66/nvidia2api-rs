@@ -828,7 +828,35 @@ fn compose_grid_3x3(tiles: Vec<Vec<u8>>) -> Option<Vec<u8>> {
     Some(buf.into_inner())
 }
 
-/// 全页截图裁 challenge iframe (返回 PNG bytes + [x,y,w,h])
+/// 空图检测 — 全黑/全白截图 (跨域 iframe 合成层丢失) 直接报错
+fn raster_is_empty(px: &[u8]) -> bool {
+    if px.is_empty() {
+        return true;
+    }
+    let mut sum = 0f64;
+    let mut sum2 = 0f64;
+    let n = (px.len() / 3) as f64;
+    let step = (px.len() / 3 / 500).max(1) * 3;
+    let mut cnt = 0f64;
+    let mut i = 0;
+    while i + 2 < px.len() {
+        let g = 0.299 * px[i] as f64 + 0.587 * px[i + 1] as f64 + 0.114 * px[i + 2] as f64;
+        sum += g;
+        sum2 += g * g;
+        cnt += 1.0;
+        i += step;
+    }
+    if cnt < 10.0 {
+        return true;
+    }
+    let mean = sum / cnt;
+    let std = ((sum2 / cnt - mean * mean).max(0.0)).sqrt();
+    // 均值极端 (全黑<8 或 全白>247) 或方差极低 (纯色) → 空
+    mean < 8.0 || mean > 247.0 || std < 3.0
+}
+
+/// 全页截图裁 challenge iframe (返回 PNG bytes + [x,y,w,h]);
+/// 全页截图黑层时回退 iframe 元素级截图。
 async fn capture_challenge_full(
     page: &playwright_rs::Page,
 ) -> Result<(Vec<u8>, [f64; 4]), String> {
@@ -854,25 +882,50 @@ async fn capture_challenge_full(
         return Err("rect 不完整".into());
     }
     let (rx, ry, rw, rh) = (arr[0], arr[1], arr[2], arr[3]);
-    let png = page
+
+    let crop_from = |png: &[u8]| -> Option<(Vec<u8>, usize, usize)> {
+        let (px, pw, ph) = super::drag::decode_png(png).ok()?;
+        let img = image::RgbImage::from_raw(pw as u32, ph as u32, px)?;
+        let crop = image::imageops::crop_imm(
+            &img,
+            rx.clamp(0.0, pw as f64 - 1.0) as u32,
+            ry.clamp(0.0, ph as f64 - 1.0) as u32,
+            rw.min(pw as f64 - rx.max(0.0)) as u32,
+            rh.min(ph as f64 - ry.max(0.0)) as u32,
+        )
+        .to_image();
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(crop)
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .ok()?;
+        Some((buf.into_inner(), pw, ph))
+    };
+
+    // 路径 1: 全页截图裁剪
+    if let Ok(png) = page.screenshot(None).await {
+        if let Some((cropped, pw, ph)) = crop_from(&png) {
+            let (px, _, _) = super::drag::decode_png(&cropped)?;
+            if !raster_is_empty(&px) {
+                return Ok((cropped, [rx, ry, rw, rh]));
+            }
+            println!("[vlm] 全页截图空图 (均值/方差检测), 回退元素截图 ({pw}x{ph})");
+        }
+    }
+
+    // 路径 2: iframe 元素级截图 (light DOM locator)
+    let loc = page
+        .locator("iframe[src*='hcaptcha']")
+        .nth(0);
+    let png = loc
         .screenshot(None)
         .await
-        .map_err(|e| format!("截图: {e}"))?;
+        .map_err(|e| format!("元素截图: {e}"))?;
     let (px, pw, ph) = super::drag::decode_png(&png)?;
-    let img = image::RgbImage::from_raw(pw as u32, ph as u32, px).ok_or("重建失败")?;
-    let crop = image::imageops::crop_imm(
-        &img,
-        rx.clamp(0.0, pw as f64 - 1.0) as u32,
-        ry.clamp(0.0, ph as f64 - 1.0) as u32,
-        rw.min(pw as f64 - rx.max(0.0)) as u32,
-        rh.min(ph as f64 - ry.max(0.0)) as u32,
-    )
-    .to_image();
-    let mut buf = std::io::Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgb8(crop)
-        .write_to(&mut buf, image::ImageFormat::Png)
-        .map_err(|e| format!("编码: {e}"))?;
-    Ok((buf.into_inner(), [rx, ry, rw, rh]))
+    if raster_is_empty(&px) {
+        return Err(format!("元素截图也是空图 ({pw}x{ph})"));
+    }
+    println!("[vlm] 元素截图成功 ({pw}x{ph})");
+    Ok((png, [rx, ry, rw, rh]))
 }
 
 async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Result<(), String> {
