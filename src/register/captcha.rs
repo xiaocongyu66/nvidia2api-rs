@@ -967,7 +967,7 @@ async fn capture_challenge_full(
     let count = frames.count().await.unwrap_or(0);
     let mut png_opt: Option<Vec<u8>> = None;
     for i in 0..count {
-        let f = frames.nth(i);
+        let f = frames.nth(i as i32);
         let Ok(Some(b)) = f.bounding_box().await else {
             continue;
         };
