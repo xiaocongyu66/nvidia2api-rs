@@ -961,20 +961,34 @@ async fn capture_challenge_full(
         Some((buf.into_inner(), pw, ph))
     };
 
-    // 路径 1: iframe 元素级截图 (light DOM locator) — CDP 对元素节点截图,
-    // 跨域合成层内容保真, 坐标自动 1:1 (全页截图会丢跨域层/混入登录页背景)
-    let loc = page
-        .locator("iframe[src*='hcaptcha']")
-        .nth(0);
-    if let Ok(png) = loc.screenshot(None).await {
-        if let Ok((px, pw, ph)) = super::drag::decode_png(&png) {
-            if !raster_is_empty(&px) {
-                println!("[vlm] 元素截图成功 ({pw}x{ph})");
-                return Ok((png, [rx, ry, rw, rh]));
+    // 路径 1: iframe 元素级截图 — E1 中间框干扰 (302x76), 遍历按尺寸过滤
+    // width>250 && height>400 才是 challenge 框 (checkbox/E1 均 ~74-76 高)
+    let frames = page.locator("iframe[src*='hcaptcha']");
+    let count = frames.count().await.unwrap_or(0);
+    let mut png_opt: Option<Vec<u8>> = None;
+    for i in 0..count {
+        let f = frames.nth(i);
+        let Ok(Some(b)) = f.bounding_box().await else {
+            continue;
+        };
+        if b.width <= 250.0 || b.height <= 400.0 {
+            continue;
+        }
+        if let Ok(png) = f.screenshot(None).await {
+            if let Ok((px, pw, ph)) = super::drag::decode_png(&png) {
+                if !raster_is_empty(&px) {
+                    println!("[vlm] 元素截图成功 ({}x{}, iframe {i} = {}x{})", pw, ph, b.width as i64, b.height as i64);
+                    png_opt = Some(png);
+                    break;
+                }
+                println!("[vlm] iframe {i} ({}x{}) 截图空图", b.width as i64, b.height as i64);
             }
-            println!("[vlm] 元素截图空图 ({pw}x{ph}), 回退全页裁剪");
         }
     }
+    if let Some(png) = png_opt {
+        return Ok((png, [rx, ry, rw, rh]));
+    }
+    println!("[vlm] 元素截图全部失败/空, 回退全页裁剪");
 
     // 路径 2: 全页截图裁剪 (回退)
     if let Ok(png) = page.screenshot(None).await {
