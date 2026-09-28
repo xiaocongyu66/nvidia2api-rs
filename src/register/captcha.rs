@@ -28,6 +28,8 @@ static SITEKEY: Mutex<Option<String>> = Mutex::new(None);
 /// getcaptcha 响应体嗅探槽 — 挑战提示词 + tile 图 URL 全在里面。
 static GETCAPTCHA: Mutex<Option<Value>> = Mutex::new(None);
 static REGISTER_STATUS: Mutex<Option<u16>> = Mutex::new(None);
+/// 截图模式最近一次的网格参数 [rx, ry, gx, gy, tile] — 点击路线 B 与切图同坐标系
+static LAST_GRID: Mutex<Option<[f64; 5]>> = Mutex::new(None);
 
 pub fn reset_sitekey() {
     *SITEKEY.lock().unwrap() = None;
@@ -650,8 +652,9 @@ async fn fetch_tile_images(
     }
 
     // 来源 1.5: 全页截图切 3x3 (不依赖 challenge frame — 加密响应时的主力)
-    if let Ok(tiles) = capture_challenge_tiles(page).await {
+    if let Ok((tiles, grid)) = capture_challenge_tiles(page).await {
         println!("[vision] tile 来源: 页面截图 ({}张)", tiles.len());
+        *LAST_GRID.lock().unwrap() = Some(grid);
         return Ok(tiles);
     }
 
@@ -755,7 +758,9 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
 /// challenge iframe 在主 DOM 的 light DOM (实测), 拿 bounding rect →
 /// Page::screenshot 全页 PNG → 裁 iframe 区域 → 按标准网格布局切 3x3。
 /// 坐标系与路线 B (物理点击) 完全一致。
-async fn capture_challenge_tiles(page: &playwright_rs::Page) -> Result<Vec<(String, Vec<u8>)>, String> {
+async fn capture_challenge_tiles(
+    page: &playwright_rs::Page,
+) -> Result<(Vec<(String, Vec<u8>)>, [f64; 5]), String> {
     let js = r#"(() => {
         const fs = [...document.querySelectorAll('iframe')].filter(f =>
             (f.src||'').includes('frame=challenge') || (f.src||'').includes('newassets.hcaptcha'));
@@ -784,34 +789,54 @@ async fn capture_challenge_tiles(page: &playwright_rs::Page) -> Result<Vec<(Stri
     println!("[vision] 截图模式: 页面{pw}x{ph} iframe=({rx:.0},{ry:.0} {rw:.0}x{rh:.0})");
     let img = image::RgbImage::from_raw(pw as u32, ph as u32, px).ok_or("页面图重建失败")?;
 
-    // 网格布局常量 (与路线 B 一致)
-    let pad = 20.0;
-    let top = 90.0;
-    let tile_w = (rw - 2.0 * pad) / 3.0;
+    // 裁 iframe 区域 (检测与切图都在此坐标系)
+    let crop = image::imageops::crop_imm(
+        &img,
+        rx.clamp(0.0, pw as f64 - 1.0) as u32,
+        ry.clamp(0.0, ph as f64 - 1.0) as u32,
+        rw.min(pw as f64 - rx.max(0.0)) as u32,
+        rh.min(ph as f64 - ry.max(0.0)) as u32,
+    )
+    .to_image();
+    let (cw, ch) = (crop.width() as usize, crop.height() as usize);
+    let cpx = crop.into_raw();
+
+    // 自动网格检测 (实测 tile 位置), 失败退回常量猜测
+    let (gx, gy, gt) = match super::drag::detect_grid_3x3(&cpx, cw, ch) {
+        Some((gx, gy, gt)) => {
+            println!("[vision] 网格实测: 起点=({gx:.0},{gy:.0}) tile={gt:.0}px");
+            (gx, gy, gt)
+        }
+        None => {
+            let g = (rw - 40.0) / 3.0;
+            println!("[vision] 网格检测失败, 常量回退 pad=20 top=90 tile={g:.0}");
+            (20.0, 90.0, g)
+        }
+    };
+    let grid = [rx, ry, gx, gy, gt];
+
+    let crop_img = image::RgbImage::from_raw(cw as u32, ch as u32, cpx).ok_or("裁剪重建失败")?;
     let mut out = Vec::new();
     for idx in 0..9usize {
         let col = (idx % 3) as f64;
         let row = (idx / 3) as f64;
-        let x0 = (rx + pad + col * tile_w).clamp(0.0, pw as f64 - 1.0) as u32;
-        let y0 = (ry + top + row * tile_w).clamp(0.0, ph as f64 - 1.0) as u32;
-        let tw = tile_w.min(pw as f64 - x0 as f64) as u32;
-        let th = tile_w.min(ph as f64 - y0 as f64) as u32;
+        let x0 = (gx + col * gt).clamp(0.0, cw as f64 - 1.0) as u32;
+        let y0 = (gy + row * gt).clamp(0.0, ch as f64 - 1.0) as u32;
+        let tw = gt.min(cw as f64 - x0 as f64) as u32;
+        let th = gt.min(ch as f64 - y0 as f64) as u32;
         if tw < 10 || th < 10 {
             continue;
         }
-        let sub = image::imageops::crop_imm(&img, x0, y0, tw, th).to_image();
+        let sub = image::imageops::crop_imm(&crop_img, x0, y0, tw, th).to_image();
         let mut buf = std::io::Cursor::new(Vec::new());
-        if sub
-            .write_to(&mut buf, image::ImageFormat::Png)
-            .is_ok()
-        {
+        if sub.write_to(&mut buf, image::ImageFormat::Png).is_ok() {
             out.push((format!("shot-{idx}"), buf.into_inner()));
         }
     }
     if out.is_empty() {
         return Err("截图模式切图失败".into());
     }
-    Ok(out)
+    Ok((out, grid))
 }
 
 /// 点击 tile + 提交 — 两级路线:
@@ -864,15 +889,24 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
     }
     let (rx, ry, rw, _rh) = (arr[0], arr[1], arr[2], arr[3]);
     println!("[vision] challenge iframe rect=({rx:.0},{ry:.0} {rw:.0}x{_rh:.0})");
-    let pad = 20.0;
-    let top = 90.0;
-    let tile = (rw - 2.0 * pad) / 3.0;
+    // 优先用截图模式实测的网格 (同坐标系), 无则常量回退
+    let (gx, gy, tile) = match *LAST_GRID.lock().unwrap() {
+        Some([lrx, lry, gx, gy, gt]) if (lrx - rx).abs() < 2.0 && (lry - ry).abs() < 2.0 => {
+            println!("[vision] 复用实测网格: 起点=({gx:.0},{gy:.0}) tile={gt:.0}");
+            (gx, gy, gt)
+        }
+        _ => {
+            let t = (rw - 40.0) / 3.0;
+            println!("[vision] 网格缓存不可用, 常量回退 tile={t:.0}");
+            (20.0, 90.0, t)
+        }
+    };
     let mouse = page.mouse();
     for &i in set {
         let col = (i % 3) as f64;
         let row = (i / 3) as f64;
-        let x = rx + pad + col * tile + tile / 2.0;
-        let y = ry + top + row * tile + tile / 2.0;
+        let x = rx + gx + col * tile + tile / 2.0;
+        let y = ry + gy + row * tile + tile / 2.0;
         println!("[vision] 物理 tile{i} @ ({x:.0},{y:.0})");
         let _ = mouse.click(x, y, None).await;
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;

@@ -618,3 +618,110 @@ pub fn decode_png(bytes: &[u8]) -> Result<(Vec<u8>, usize, usize), String> {
     let (w, h) = (rgb.width() as usize, rgb.height() as usize);
     Ok((rgb.into_raw(), w, h))
 }
+
+// ---------------------------------------------------------------------------
+// 3x3 网格自动检测 (截图模式) — 从像素实测 tile 位置, 不依赖猜测布局常量。
+// 原理: tile 之间是低方差的白色缝隙, tile 内容是高方差区 →
+//       逐列/逐行灰度 std, 找 3 个等距高方差带 (对齐原版 detect_label_grid)。
+// ---------------------------------------------------------------------------
+
+/// 一维 std 序列上找 count 个内容带 (超过均值为带, 合并相邻, 按宽排序取前 count)
+fn runs_above(values: &[f32], count: usize) -> Option<Vec<(usize, usize)>> {
+    let mean = values.iter().sum::<f32>() / values.len() as f32;
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    let mut start: Option<usize> = None;
+    for (i, &v) in values.iter().enumerate() {
+        if v > mean {
+            if start.is_none() {
+                start = Some(i);
+            }
+        } else if let Some(s) = start.take() {
+            runs.push((s, i - 1));
+        }
+    }
+    if let Some(s) = start.take() {
+        runs.push((s, values.len() - 1));
+    }
+    if runs.len() < count {
+        return None;
+    }
+    // 合并窄缝 (<4px) 分隔的带
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for r in runs {
+        if let Some(last) = merged.last_mut() {
+            if r.0 - last.1 <= 4 {
+                last.1 = r.1;
+                continue;
+            }
+        }
+        merged.push(r);
+    }
+    if merged.len() < count {
+        return None;
+    }
+    let mut by_w = merged.clone();
+    by_w.sort_by_key(|(a, b)| std::cmp::Reverse(b - a + 1));
+    let mut picked: Vec<(usize, usize)> = by_w.into_iter().take(count).collect();
+    picked.sort();
+    // 等距校验: 带宽相近 (最大/最小 > 0.55) 且间距均匀
+    let widths: Vec<usize> = picked.iter().map(|(a, b)| b - a + 1).collect();
+    let wmin = *widths.iter().min()?;
+    let wmax = *widths.iter().max()?;
+    if wmax == 0 || (wmin as f32 / wmax as f32) < 0.55 {
+        return None;
+    }
+    Some(picked)
+}
+
+/// 在 RGB 图上检测 3x3 网格, 返回 (x0, y0, tile_w) — 每带取中点的等距网格。
+/// 未检出时返回 None (调用方退回常量)。
+pub fn detect_grid_3x3(px: &[u8], w: usize, h: usize) -> Option<(f64, f64, f64)> {
+    // 灰度
+    let gray: Vec<f32> = (0..w * h)
+        .map(|i| {
+            let p = &px[i * 3..i * 3 + 3];
+            0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32
+        })
+        .collect();
+
+    // 列 std (垂直采样中段, 避开 prompt 区与按钮区)
+    let y_a = h * 30 / 100;
+    let y_b = h * 75 / 100;
+    let mut col_std = vec![0f32; w];
+    for x in 0..w {
+        let mut s = 0f64;
+        let mut s2 = 0f64;
+        let n = (y_b - y_a) as f64;
+        for y in y_a..y_b {
+            let g = gray[y * w + x] as f64;
+            s += g;
+            s2 += g * g;
+        }
+        col_std[x] = ((s2 - s * s / n).max(0.0) / n).sqrt() as f32;
+    }
+    let col_runs = runs_above(&col_std, 3)?;
+
+    // 行 std (在检测到的列带范围内采样)
+    let x_a = col_runs[0].0;
+    let x_b = col_runs[2].1;
+    let mut row_std = vec![0f32; h];
+    for y in 0..h {
+        let mut s = 0f64;
+        let mut s2 = 0f64;
+        let n = (x_b - x_a + 1) as f64;
+        for x in x_a..=x_b {
+            let g = gray[y * w + x] as f64;
+            s += g;
+            s2 += g * g;
+        }
+        row_std[y] = ((s2 - s * s / n).max(0.0) / n).sqrt() as f32;
+    }
+    let row_runs = runs_above(&row_std, 3)?;
+
+    // 网格: tile 中心 = 带中心; 边长 = 带宽 (内容带比 tile 略窄, 加半缝修正)
+    let cx = |r: (usize, usize)| (r.0 + r.1) as f64 / 2.0;
+    let tile_w = (cx(col_runs[2]) - cx(col_runs[0])) / 2.0 * 1.04;
+    let tile_h = (cx(row_runs[2]) - cx(row_runs[0])) / 2.0 * 1.04;
+    let tile = (tile_w + tile_h) / 2.0;
+    Some((cx(col_runs[0]), cx(row_runs[0]), tile))
+}
