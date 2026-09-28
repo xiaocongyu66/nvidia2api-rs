@@ -915,6 +915,28 @@ fn raster_is_empty(px: &[u8]) -> bool {
     mean < 8.0 || mean > 247.0 || std < 3.0
 }
 
+/// 采样比较两帧: 差异像素比例 >2% = 画面在动 (加载中/动画)
+fn raster_differs(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return true;
+    }
+    let step = (a.len() / 3 / 400).max(1) * 3;
+    let mut diff = 0f64;
+    let mut total = 0f64;
+    let mut i = 0;
+    while i + 2 < a.len() {
+        if (a[i] as i32 - b[i] as i32).abs() > 24
+            || (a[i + 1] as i32 - b[i + 1] as i32).abs() > 24
+            || (a[i + 2] as i32 - b[i + 2] as i32).abs() > 24
+        {
+            diff += 1.0;
+        }
+        total += 1.0;
+        i += step;
+    }
+    total > 0.0 && diff / total > 0.02
+}
+
 /// 全页截图裁 challenge iframe (返回 PNG bytes + [x,y,w,h]);
 /// 全页截图黑层时回退 iframe 元素级截图。
 async fn capture_challenge_full(
@@ -963,10 +985,11 @@ async fn capture_challenge_full(
 
     // 路径 1: iframe 元素级截图 — E1 中间框干扰 (302x76), 遍历按尺寸过滤
     // width>250 && height>400 才是 challenge 框 (checkbox/E1 均 ~74-76 高)
+    // + 帧稳定检测: 连续两帧像素一致才接受 (VLM reasoning 实锤 "加载中状态" 问题)
     let frames = page.locator("iframe[src*='hcaptcha']");
     let count = frames.count().await.unwrap_or(0);
     let mut png_opt: Option<Vec<u8>> = None;
-    for i in 0..count {
+    'outer: for i in 0..count {
         let f = frames.nth(i as i32);
         let Ok(Some(b)) = f.bounding_box().await else {
             continue;
@@ -974,15 +997,35 @@ async fn capture_challenge_full(
         if b.width <= 250.0 || b.height <= 400.0 {
             continue;
         }
-        if let Ok(png) = f.screenshot(None).await {
-            if let Ok((px, pw, ph)) = super::drag::decode_png(&png) {
-                if !raster_is_empty(&px) {
-                    println!("[vlm] 元素截图成功 ({}x{}, iframe {i} = {}x{})", pw, ph, b.width as i64, b.height as i64);
-                    png_opt = Some(png);
-                    break;
-                }
-                println!("[vlm] iframe {i} ({}x{}) 截图空图", b.width as i64, b.height as i64);
+        let mut last: Option<(Vec<u8>, usize, usize)> = None;
+        for attempt in 0..5 {
+            let Ok(png) = f.screenshot(None).await else {
+                break;
+            };
+            let Ok((px, pw, ph)) = super::drag::decode_png(&png) else {
+                break;
+            };
+            if raster_is_empty(&px) {
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                continue;
             }
+            if let Some((lpx, lw, lh)) = &last {
+                if lw == &pw && lh == &ph && !raster_differs(lpx, &px) {
+                    println!(
+                        "[vlm] 元素截图稳定 (第{}次, {}x{}, iframe {i})",
+                        attempt + 1,
+                        pw,
+                        ph
+                    );
+                    png_opt = Some(png);
+                    break 'outer;
+                }
+            }
+            last = Some((px, pw, ph));
+            tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        }
+        if png_opt.is_none() {
+            println!("[vlm] iframe {i} 画面 5 次尝试未稳定");
         }
     }
     if let Some(png) = png_opt {
