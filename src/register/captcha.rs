@@ -567,11 +567,21 @@ async fn find_challenge_frame_wait(
 ) -> Option<playwright_rs::protocol::Frame> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
     loop {
+        // 主路径: page.frames() 快照
         if let Ok(frames) = page.frames().await {
             for f in frames {
                 let u = f.url();
                 if u.contains("frame=challenge") || u.contains("newassets.hcaptcha.com") {
                     return Some(f);
+                }
+            }
+            // 备用路径: 主 frame 的 child_frames (frame 树的另一条视图)
+            if let Some(main) = frames.iter().find(|f| f.parent_frame().is_none()) {
+                for cf in main.child_frames() {
+                    let u = cf.url();
+                    if u.contains("frame=challenge") || u.contains("newassets.hcaptcha.com") {
+                        return Some(cf);
+                    }
                 }
             }
         }
@@ -726,28 +736,76 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
         return Err("no click set generated".into());
     };
     println!("[vision] 点击集1: {set:?} (共{}套候选)", sets.len());
+    click_tiles_and_submit(page, &set).await
+}
 
-    let frame = find_challenge_frame_wait(page, 10_000)
+/// 点击 tile + 提交 — 两级路线:
+/// A. challenge frame (locator 精确点击)
+/// B. frame 树失效时物理坐标: challenge iframe 的 bounding rect + 标准网格布局推算 tile 中心
+///    (hCaptcha challenge iframe 内部布局: 左右 padding~20, prompt 高~90, tile 均分剩余宽度)
+async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Result<(), String> {
+    if let Some(frame) = find_challenge_frame_wait(page, 5_000).await {
+        println!("[vision] 点击路线 A: challenge frame");
+        let count = frame.locator(".task-image .image").count().await.unwrap_or(0);
+        let sel = if count > 0 { ".task-image .image" } else { ".task-image" };
+        for &i in set {
+            if (i as i32) < count as i32 || count == 0 {
+                let _ = frame.locator(sel).nth(i as i32).click(None).await;
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+        }
+        let submit = frame.locator(".button-submit");
+        for _ in 0..10 {
+            if submit.count().await.unwrap_or(0) > 0 && submit.is_enabled().await.unwrap_or(false) {
+                let _ = submit.click(None).await;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        return Ok(());
+    }
+
+    // 路线 B: 物理坐标
+    println!("[vision] 点击路线 B: 物理坐标 (frame 树未 attach)");
+    let js = r#"(() => {
+        const fs = [...document.querySelectorAll('iframe')].filter(f =>
+            (f.src||'').includes('frame=challenge') || (f.src||'').includes('newassets.hcaptcha'));
+        if (!fs.length) return null;
+        // challenge iframe 通常是较宽的那个
+        let best = fs[0];
+        for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
+        const r = best.getBoundingClientRect();
+        return JSON.stringify([r.x, r.y, r.width, r.height]);
+    })()"#;
+    let v = page
+        .evaluate::<Value, Value>(js, None)
         .await
-        .ok_or("challenge frame not found (等10s)")?;
-    let count = frame.locator(".task-image .image").count().await.unwrap_or(0);
-    let sel = if count > 0 { ".task-image .image" } else { ".task-image" };
-
+        .map_err(|e| format!("iframe rect: {e}"))?;
+    let s = v.as_str().ok_or("challenge iframe 未找到 (路线B)")?;
+    let arr: Vec<f64> = serde_json::from_str(s).map_err(|e| format!("rect 解析: {e}"))?;
+    if arr.len() != 4 {
+        return Err("rect 数据不完整".into());
+    }
+    let (rx, ry, rw, _rh) = (arr[0], arr[1], arr[2], arr[3]);
+    println!("[vision] challenge iframe rect=({rx:.0},{ry:.0} {rw:.0}x{_rh:.0})");
+    let pad = 20.0;
+    let top = 90.0;
+    let tile = (rw - 2.0 * pad) / 3.0;
+    let mouse = page.mouse();
     for &i in set {
-        if (i as i32) < count as i32 || count == 0 {
-            let _ = frame.locator(sel).nth(i as i32).click(None).await;
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        }
+        let col = (i % 3) as f64;
+        let row = (i / 3) as f64;
+        let x = rx + pad + col * tile + tile / 2.0;
+        let y = ry + top + row * tile + tile / 2.0;
+        println!("[vision] 物理 tile{i} @ ({x:.0},{y:.0})");
+        let _ = mouse.click(x, y, None).await;
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
-
-    let submit = frame.locator(".button-submit");
-    for _ in 0..10 {
-        if submit.count().await.unwrap_or(0) > 0 && submit.is_enabled().await.unwrap_or(false) {
-            let _ = submit.click(None).await;
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-    }
+    // submit 按钮: iframe 底部中央
+    let sy = ry + _rh - 45.0;
+    println!("[vision] 物理 submit @ ({:.0},{sy:.0})", rx + rw / 2.0);
+    let _ = mouse.click(rx + rw / 2.0, sy, None).await;
     tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
     Ok(())
 }
