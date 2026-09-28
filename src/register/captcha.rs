@@ -939,6 +939,92 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
     Ok(())
 }
 
+/// 加密轮次的 drag 画布求解: challenge iframe 裁剪图直接喂 pair_drag CV。
+/// (加密时 frame 树未 attach 拿不到 canvas 元素, 但 iframe 画面完整可见)
+async fn solve_drag_screenshot(page: &playwright_rs::Page) -> Result<(), String> {
+    let js = r#"(() => {
+        const fs = [...document.querySelectorAll('iframe')].filter(f => {
+            if (!(f.src||'').includes('hcaptcha')) return false;
+            const r = f.getBoundingClientRect();
+            return r.width > 250 && r.height > 400;
+        });
+        if (!fs.length) return null;
+        let best = fs[0];
+        for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
+        const r = best.getBoundingClientRect();
+        return JSON.stringify([r.x, r.y, r.width, r.height]);
+    })()"#;
+    let v = page
+        .evaluate::<Value, Value>(js, None)
+        .await
+        .map_err(|e| format!("iframe rect: {e}"))?;
+    let s = v.as_str().ok_or("challenge iframe 未找到 (drag截图)")?;
+    let arr: Vec<f64> = serde_json::from_str(s).map_err(|e| format!("rect 解析: {e}"))?;
+    if arr.len() != 4 {
+        return Err("rect 数据不完整".into());
+    }
+    let (rx, ry, rw, rh) = (arr[0], arr[1], arr[2], arr[3]);
+
+    let png = page
+        .screenshot(None)
+        .await
+        .map_err(|e| format!("全页截图: {e}"))?;
+    let (px, pw, ph) = super::drag::decode_png(&png)?;
+    let img = image::RgbImage::from_raw(pw as u32, ph as u32, px).ok_or("页面图重建失败")?;
+    let crop = image::imageops::crop_imm(
+        &img,
+        rx.clamp(0.0, pw as f64 - 1.0) as u32,
+        ry.clamp(0.0, ph as f64 - 1.0) as u32,
+        rw.min(pw as f64 - rx.max(0.0)) as u32,
+        rh.min(ph as f64 - ry.max(0.0)) as u32,
+    )
+    .to_image();
+    let (cw, ch) = (crop.width() as usize, crop.height() as usize);
+    let cpx = crop.into_raw();
+    println!("[vision] drag 截图模式: 画布{}x{}", cw, ch);
+
+    let prompt = "Drag the letter to the place where it fits";
+    let sol = super::drag::solve_pair_drag(&cpx, cw, ch)?;
+    println!("[vision] drag 截图: from=({:.0},{:.0}) → to=({:.0},{:.0})", sol.from.0, sol.from.1, sol.to.0, sol.to.1);
+
+    // debug 标注
+    if !DEBUG_SAVED.swap(true, Ordering::Relaxed) {
+        let dir = std::path::Path::new("data/debug");
+        let _ = std::fs::create_dir_all(dir);
+        let mut img2 = cpx.clone();
+        let cross = |img: &mut [u8], cx: f64, cy: f64, rgb: [u8; 3]| {
+            let (cx, cy) = (cx as isize, cy as isize);
+            for d in -12..=12isize {
+                for (dx, dy) in [(d, 0isize), (0isize, d)] {
+                    let (x, y) = (cx + dx, cy + dy);
+                    if x >= 0 && y >= 0 && (x as usize) < cw && (y as usize) < ch {
+                        let i = (y as usize * cw + x as usize) * 3;
+                        img[i] = rgb[0];
+                        img[i + 1] = rgb[1];
+                        img[i + 2] = rgb[2];
+                    }
+                }
+            }
+        };
+        cross(&mut img2, sol.from.0, sol.from.1, [255, 0, 0]);
+        cross(&mut img2, sol.to.0, sol.to.1, [0, 100, 255]);
+        if let Some(v) = image::RgbImage::from_raw(cw as u32, ch as u32, img2) {
+            let _ = v.save(dir.join("drag_screenshot.png"));
+            println!("[vision] debug 图已存: data/debug/drag_screenshot.png");
+        }
+    }
+
+    // 画布内像素 → 页面坐标 (1:1, 截图即 CSS 尺寸)
+    human_drag(
+        page,
+        rx + sol.from.0,
+        ry + sol.from.1,
+        rx + sol.to.0,
+        ry + sol.to.1,
+    )
+    .await
+}
+
 /// 拖拽题: challenge canvas 截图 → CV 求解 → 人类化拖拽手势。
 async fn solve_drag_round(page: &playwright_rs::Page, prompt: &str) -> Result<(), String> {
     let frame = find_challenge_frame_wait(page, 10_000)
@@ -1157,10 +1243,20 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                         .unwrap_or(false);
                     if challenge_visible {
                         println!("[vision] 加密轮次检测到挑战画面, 截图模式求解");
-                        let placeholder = serde_json::json!({"tasklist": []});
-                        match solve_challenge_round(page, &placeholder).await {
-                            Ok(()) => println!("[vision] 加密轮次截图求解完成"),
-                            Err(e) => println!("[vision] 加密轮次求解失败: {e}"),
+                        // 主路径: drag 画布求解 (当前环境主力题型 — banner+拖拽区结构)
+                        match solve_drag_screenshot(page).await {
+                            Ok(()) => {
+                                println!("[vision] 加密轮次 drag 截图求解完成");
+                                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                            }
+                            Err(e) => {
+                                println!("[vision] 加密轮次 drag 求解失败: {e}, 回退 3x3 分类");
+                                let placeholder = serde_json::json!({"tasklist": []});
+                                match solve_challenge_round(page, &placeholder).await {
+                                    Ok(()) => println!("[vision] 加密轮次截图求解完成"),
+                                    Err(e) => println!("[vision] 加密轮次求解失败: {e}"),
+                                }
+                            }
                         }
                     }
                 }
