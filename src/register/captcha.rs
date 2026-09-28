@@ -944,12 +944,14 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
 
     while tokio::time::Instant::now() < deadline {
         // 1. 已有 token 直接返回 (答对后 challenge 关闭, token 落 textarea)
+        //    注意: checkbox 点击后 widget 会先写 E1_ 开头的 challenge key (中间值),
+        //    真正的 pass token 是 P0_/P1_ 开头的长串 — 只认后者
         if let Ok(frames) = page.frames().await {
             for f in &frames {
                 if let Ok(v) = f.evaluate::<Value>(js_token, None).await {
                     if let Some(tok) = v.as_str() {
-                        if !tok.is_empty() {
-                            println!("[vision] token 已出现 (len={})", tok.len());
+                        if !tok.is_empty() && !tok.starts_with("E1_") && tok.len() > 50 {
+                            println!("[vision] pass token 已出现 (len={}, prefix={})", tok.len(), &tok[..2]);
                             return Ok(tok.to_string());
                         }
                     }
