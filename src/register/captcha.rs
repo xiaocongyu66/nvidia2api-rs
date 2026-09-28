@@ -691,6 +691,25 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
     super::vision::ensure_engine()?;
     println!("[vision] 引擎就绪, 挂 getcaptcha 嗅探器");
     watch_getcaptcha(page).await;
+    // hCaptcha 资源加载追踪 — 判断 widget 不渲染是脚本未加载还是初始化失败
+    let _ = page
+        .on_request(|req| async move {
+            let u = req.url();
+            if u.contains("hcaptcha.com") || u.contains("newassets.hcaptcha") {
+                println!("[vision] hcaptcha 请求: {}", &u[..u.len().min(90)]);
+            }
+            Ok(())
+        })
+        .await;
+    let _ = page
+        .on_request_failed(|req| async move {
+            let u = req.url();
+            if u.contains("hcaptcha") || u.contains("nvgs.nvidia.com") {
+                println!("[vision] 请求失败: {}", &u[..u.len().min(90)]);
+            }
+            Ok(())
+        })
+        .await;
 
     let js_token = "(() => { const t = document.querySelector('textarea[name=\"h-captcha-response\"], [name=\"g-recaptcha-response\"]'); return (t && t.value) ? t.value : ''; })()";
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
@@ -724,6 +743,20 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                     .map(|fs| fs.iter().map(|f| f.url().chars().take(70).collect()).collect())
                     .unwrap_or_default();
                 println!("[vision] 无挑战数据, 点 checkbox (第{checkbox_ticks}次, frames={urls:?})");
+                if checkbox_ticks % 15 == 1 {
+                    // widget 状态深探: 脚本是否加载 / 容器是否存在
+                    let js = r#"(() => JSON.stringify({
+                        iframes: [...document.querySelectorAll('iframe')].map(f => (f.src||'').slice(0,60)),
+                        hcaptchaDivs: document.querySelectorAll('.h-captcha, [data-hcaptcha-widget-id], [class*=hcaptcha]').length,
+                        hcaptchaScript: [...document.querySelectorAll('script')].some(s => (s.src||'').includes('hcaptcha')),
+                        hasObj: typeof window.hcaptcha,
+                        registerBtn: !!document.querySelector('#register_button'),
+                        passwordFilled: !!document.querySelector('#registration_password'),
+                    }))()"#;
+                    if let Ok(v) = page.evaluate::<Value>(js, None).await {
+                        println!("[vision] DOM 探针: {v}");
+                    }
+                }
             }
             try_click_hcaptcha_checkbox(page).await;
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
