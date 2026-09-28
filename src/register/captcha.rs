@@ -765,14 +765,16 @@ async fn inner_vlm_solve(
         .unwrap_or_default();
 
     let mut grid_png: Option<Vec<u8>> = None;
-    if urls.len() >= 9 {
+    // tasklist 2-9 张全部下载原图拼动态网格 (明文轮数据完整喂 VLM; 截图轮常是加载中)
+    if urls.len() >= 2 && urls.len() <= 9 {
         let mut tiles: Vec<Option<Vec<u8>>> = Vec::new();
         for u in urls.iter().take(9) {
             tiles.push(download_tile(&client, u, &ua).await);
         }
         if tiles.iter().all(|t| t.is_some()) {
-            if let Some(png) = compose_grid_3x3(tiles.iter().map(|t| t.clone().unwrap()).collect()) {
-                println!("[vlm] 挑战图来源: tasklist 9 张拼图");
+            let bytes: Vec<Vec<u8>> = tiles.iter().map(|t| t.clone().unwrap()).collect();
+            if let Some(png) = compose_grid_dynamic(&bytes) {
+                println!("[vlm] 挑战图来源: tasklist {} 张拼图", bytes.len());
                 grid_png = Some(png);
             }
         }
@@ -841,17 +843,21 @@ async fn try_vlm_overlay(
         .map_err(|e| format!("解码: {e}"))?
         .to_rgb8();
     let (w, h) = (img.width() as f64, img.height() as f64);
+    // 动态网格布局 (与 compose_grid_dynamic 同算法): 按宽高比推 cols
+    let cols = ((w / h).round() as usize).clamp(1, 3);
+    let rows = ((h / 160.0).round() as usize).clamp(1, 3);
+    let n = (cols * rows).min(9);
     let mut candidates = Vec::new();
-    for idx in 0..9usize {
-        let col = (idx % 3) as f64;
-        let row = (idx / 3) as f64;
+    for idx in 0..n {
+        let col = (idx % cols) as f64;
+        let row = (idx / cols) as f64;
         candidates.push(super::vlm::CandidateBox {
             id: format!("G{}", idx + 1),
             kind: "grid",
-            x: col * w / 3.0,
-            y: row * h / 3.0,
-            w: w / 3.0,
-            h: h / 3.0,
+            x: col * w / cols as f64,
+            y: row * h / rows as f64,
+            w: w / cols as f64,
+            h: h / rows as f64,
         });
     }
     let ids = super::vlm::click_decision(cfg, &img, &candidates, prompt, "").await?;
@@ -868,6 +874,31 @@ async fn try_vlm_overlay(
     }
     println!("[vlm] overlay 模式选中: {indices:?}");
     Ok(Some(indices))
+}
+
+/// 2-9 张 tile → 动态网格拼图 (每张 160px; cols=ceil(sqrt(n)))
+fn compose_grid_dynamic(tiles: &[Vec<u8>]) -> Option<Vec<u8>> {
+    const S: u32 = 160;
+    let n = tiles.len();
+    if n == 0 || n > 9 {
+        return None;
+    }
+    let cols = (n as f64).sqrt().ceil() as u32;
+    let cols = cols.clamp(1, 3);
+    let rows = ((n as u32) + cols - 1) / cols;
+    let mut canvas = image::RgbImage::new(cols * S, rows * S);
+    for (idx, bytes) in tiles.iter().enumerate() {
+        let img = image::load_from_memory(bytes).ok()?;
+        let resized = img.resize_exact(S, S, image::imageops::FilterType::Lanczos3).to_rgb8();
+        let col = ((idx as u32) % cols) * S;
+        let row = ((idx as u32) / cols) * S;
+        image::imageops::replace(&mut canvas, &resized, col as i64, row as i64);
+    }
+    let mut buf = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(canvas)
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .ok()?;
+    Some(buf.into_inner())
 }
 
 /// 9 张 tile bytes → 3x3 拼图 PNG (每张 160px, 整图 480x480)
