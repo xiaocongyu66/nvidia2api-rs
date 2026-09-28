@@ -150,8 +150,6 @@ pub async fn register_one(
             return Err(m);
         }
     };
-    // 指纹伪装 — 降低 hCaptcha 风控等级 (明文轮比例↑)
-    let _ = page.add_init_script(super::stealth::STEALTH).await;
 
     let result: Result<String, String> = async {
         // [2] build.nvidia.com
@@ -414,6 +412,14 @@ pub async fn register_one(
             if url_now != last_url {
                 log(&logf, &format!("[8] 页面: {}", &url_now[..url_now.len().min(90)]));
                 last_url = url_now.clone();
+            }
+            // chrome-error 页 = 跳转链某跳加载失败, 重导航把流程接回去 (对齐 zseek)
+            if url_now.starts_with("chrome-error") || url_now.contains("chrome-error://") {
+                log(&logf, "[8] 页面加载失败, 重开 build.nvidia.com 恢复流程…");
+                let _ = page.goto("https://build.nvidia.com/", None).await;
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                last_url.clear();
+                continue;
             }
             if url_now.contains("passkey") {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;

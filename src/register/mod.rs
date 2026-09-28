@@ -4,7 +4,6 @@ pub mod captcha;
 pub mod drag;
 pub mod email;
 pub mod flow;
-pub mod stealth;
 pub mod vision;
 pub mod vlm;
 
