@@ -433,10 +433,17 @@ async fn watch_getcaptcha(page: &playwright_rs::Page) {
     let _ = page
         .on_response(|resp| async move {
             if resp.url().contains("getcaptcha") {
-                if let Ok(bytes) = resp.body().await {
-                    if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
-                        *GETCAPTCHA.lock().unwrap() = Some(v);
-                    }
+                println!("[vision] getcaptcha 响应捕获 status={}", resp.status());
+                match resp.body().await {
+                    Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+                        Ok(v) => {
+                            let n = v["tasklist"].as_array().map(|a| a.len()).unwrap_or(0);
+                            println!("[vision] getcaptcha 解析成功 tasklist={n} prompt={:?}", extract_prompt(&v));
+                            *GETCAPTCHA.lock().unwrap() = Some(v);
+                        }
+                        Err(e) => println!("[vision] getcaptcha JSON 解析失败: {e}"),
+                    },
+                    Err(e) => println!("[vision] getcaptcha body 读取失败: {e}"),
                 }
             }
             Ok(())
@@ -545,8 +552,10 @@ async fn fetch_tile_images(
             }
         }
         if ok && !out.is_empty() {
+            println!("[vision] tile 来源: getcaptcha tasklist ({}张)", out.len());
             return Ok(out);
         }
+        println!("[vision] tasklist 下载失败, 降级 CSS 来源");
     }
 
     // 来源 2: challenge frame 里 .task-image .image 的 background-image CSS
@@ -613,6 +622,7 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
     let prompt = extract_prompt(data);
     let type_key = super::vision::route_type(&prompt)
         .ok_or_else(|| format!("unsupported prompt: {prompt}"))?;
+    println!("[vision] 路由题型: {type_key} (prompt={prompt:?})");
     let spec = super::vision::spec_of(type_key).ok_or("spec missing")?;
 
     let ua = page
@@ -620,12 +630,17 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
         .await
         .unwrap_or_else(|_| "Mozilla/5.0".into());
     let tiles = fetch_tile_images(page, data, &ua).await?;
+    println!("[vision] tile 图就绪 {} 张 (来源={})", tiles.len(), tiles.first().map(|(n, _)| n.clone()).unwrap_or_default());
     let embeds = super::vision::embed_images(&tiles)?;
     let scores = super::vision::classify(type_key, &embeds)?;
+    for (i, s) in scores.iter().enumerate().take(9) {
+        println!("[vision] tile{i}: pos={:.3} neg={:.3} margin={:.3}", s.positive_score, s.negative_score, s.margin);
+    }
     let sets = super::vision::build_click_sets(&scores, spec.singular, spec.threshold);
     let Some(set) = sets.first() else {
         return Err("no click set generated".into());
     };
+    println!("[vision] 点击集1: {set:?} (共{}套候选)", sets.len());
 
     let frame = find_challenge_frame(page)
         .await
@@ -668,12 +683,14 @@ async fn refresh_challenge(page: &playwright_rs::Page) -> bool {
 /// checkbox 由现有基建点过; 挑战出现后嗅探 getcaptcha → 分类 → 点击循环。
 async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<String, String> {
     super::vision::ensure_engine()?;
+    println!("[vision] 引擎就绪, 挂 getcaptcha 嗅探器");
     watch_getcaptcha(page).await;
 
     let js_token = "(() => { const t = document.querySelector('textarea[name=\"h-captcha-response\"], [name=\"g-recaptcha-response\"]'); return (t && t.value) ? t.value : ''; })()";
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
     let mut last_fp = String::new();
     let mut same_rounds = 0u32;
+    let mut checkbox_ticks = 0u32;
 
     while tokio::time::Instant::now() < deadline {
         // 1. 已有 token 直接返回 (答对后 challenge 关闭, token 落 textarea)
@@ -682,6 +699,7 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                 if let Ok(v) = f.evaluate::<Value>(js_token, None).await {
                     if let Some(tok) = v.as_str() {
                         if !tok.is_empty() {
+                            println!("[vision] token 已出现 (len={})", tok.len());
                             return Ok(tok.to_string());
                         }
                     }
@@ -692,6 +710,11 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
         // 2. 无挑战数据 → 点 checkbox 等挑战弹出
         let data = GETCAPTCHA.lock().unwrap().clone();
         let Some(data) = data else {
+            checkbox_ticks += 1;
+            if checkbox_ticks % 5 == 1 {
+                let n_frames = page.frames().await.map(|f| f.len()).unwrap_or(0);
+                println!("[vision] 无挑战数据, 尝试点 checkbox (第{checkbox_ticks}次, 页面frames={n_frames})");
+            }
             try_click_hcaptcha_checkbox(page).await;
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             continue;
@@ -714,12 +737,15 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
         same_rounds = 0;
 
         match solve_challenge_round(page, &data).await {
-            Ok(()) => {}
+            Ok(()) => println!("[vision] 本轮点击+提交完成, 等待结果"),
             Err(e) => {
+                println!("[vision] 本轮失败: {e}");
                 let _ = refresh_challenge(page).await;
                 last_fp.clear();
                 same_rounds = 0;
-                return Err(format!("vision round failed: {e}"));
+                // 单轮失败不放弃 — 刷新后继续尝试 (180s 预算内)
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                continue;
             }
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
