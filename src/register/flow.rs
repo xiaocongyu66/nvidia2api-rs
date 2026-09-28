@@ -116,16 +116,22 @@ pub async fn register_one(
             return Err(m);
         }
     };
+    // 代理: 代理池有 enabled 线路 → chromium 全局走代理 (隧道/常规自动识别)
+    let mut args = vec![
+        "--no-sandbox".to_string(),
+        "--disable-blink-features=AutomationControlled".to_string(),
+        "--lang=zh-CN".to_string(),
+    ];
+    if let Some(p) = crate::proxy_pool::chromium_proxy_arg() {
+        log(&logf, &format!("[proxy] chromium 走代理: {p}"));
+        args.push(p);
+    }
     let browser = match pw
         .chromium()
         .launch_with_options(
             playwright_rs::LaunchOptions::new()
                 .headless(cfg.headless)
-                .args(vec![
-                    "--no-sandbox".into(),
-                    "--disable-blink-features=AutomationControlled".into(),
-                    "--lang=zh-CN".into(),
-                ]),
+                .args(args),
         )
         .await
     {

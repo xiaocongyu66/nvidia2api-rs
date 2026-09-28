@@ -15,6 +15,7 @@ mod proxy_pool;
 mod register;
 mod race;
 mod storage;
+mod tunnel;
 mod user_keys;
 
 use axum::routing::{delete, get, post, put};

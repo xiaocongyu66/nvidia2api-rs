@@ -1,11 +1,79 @@
 //! 代理池: 状态机 + 测速(延迟+公网IP) + 连败 unhealthy + 冷却 (原版 proxy_service/proxy_checker 语义)。
+//! 隧道协议 (trojan/vless/ss/hy2, 自 freebuff-rs 移植): 完整分享链接存 host 列,
+//! 运行时按需拉起 127.0.0.1 本地 mixed 监听, chromium 走本地口。
 
 use crate::config::Config;
 use std::time::Duration;
 use crate::models::Proxy;
 use crate::storage::{db, now_iso};
 
-pub const IMPORT_PROTOCOLS: [&str; 4] = ["socks5", "socks5h", "http", "https"];
+pub const IMPORT_PROTOCOLS: [&str; 8] = ["socks5", "socks5h", "http", "https", "trojan", "vless", "ss", "hy2"];
+
+/// 隧道协议 (分享链接型, 与 host:port 型区分)
+pub const TUNNEL_PROTOCOLS: [&str; 4] = ["trojan", "vless", "ss", "hy2"];
+
+pub fn is_tunnel_protocol(p: &str) -> bool {
+    TUNNEL_PROTOCOLS.contains(&p)
+}
+
+// 隧道本地监听缓存: proxy_id → (端口, 已拉起)
+static TUNNEL_PORTS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<i64, u16>>> =
+    std::sync::OnceLock::new();
+
+fn tunnels() -> &'static std::sync::Mutex<std::collections::HashMap<i64, u16>> {
+    TUNNEL_PORTS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// 为隧道代理拉起本地 mixed (幂等)。返回 127.0.0.1 端口; 非隧道或失败返回 None。
+pub fn tunnel_port_for(proxy: &Proxy) -> Option<u16> {
+    if !is_tunnel_protocol(&proxy.protocol) {
+        return None;
+    }
+    let mut map = tunnels().lock().unwrap();
+    if let Some(&port) = map.get(&proxy.id) {
+        return Some(port);
+    }
+    let link = &proxy.host; // host 列存完整分享链接
+    // 解析校验 + 端口分配 (16000 + id)
+    let port = (16000i64 + proxy.id) as u16;
+    let ob = match crate::tunnel::outbound::Outbound::from_link(link) {
+        Ok(v) => std::sync::Arc::new(v),
+        Err(e) => {
+            eprintln!("[tunnel] 链接解析失败: {e}");
+            return None;
+        }
+    };
+    tokio::spawn(async move {
+        if let Err(e) = crate::tunnel::spawn_mixed(port, ob).await {
+            eprintln!("[tunnel] mixed 启动失败: {e}");
+        }
+    });
+    map.insert(proxy.id, port);
+    Some(port)
+}
+
+/// chromium --proxy-server 参数: 优先隧道 (本地 mixed 口), 否则常规代理直填。
+pub fn chromium_proxy_arg() -> Option<String> {
+    for p in list_all() {
+        if !p.enabled {
+            continue;
+        }
+        if is_tunnel_protocol(&p.protocol) {
+            if let Some(port) = tunnel_port_for(&p) {
+                return Some(format!("--proxy-server=socks5://127.0.0.1:{port}"));
+            }
+            continue;
+        }
+        // host:port 型: 组标准代理 URL
+        let auth = if p.username.is_empty() {
+            String::new()
+        } else {
+            format!("{}:{}@", p.username, p.password)
+        };
+        return Some(format!("--proxy-server={}://{}{}:{}", p.protocol, auth, p.host, p.port));
+    }
+    None
+}
 
 fn row_to_proxy(r: &rusqlite::Row) -> rusqlite::Result<Proxy> {
     Ok(Proxy {
@@ -49,7 +117,8 @@ pub fn get_by_id(id: i64) -> Option<Proxy> {
     stmt.query_row([id], row_to_proxy).ok()
 }
 
-/// 导入一行: `socks5://user:pass@host:port`。返回 (name, protocol, port, host, username, password)。
+/// 导入一行: `socks5://user:pass@host:port` 或隧道分享链接 (trojan:// vless:// ss:// hy2://)。
+/// 隧道: 返回 (name, protocol, 0, 完整链接, "", "") — host 列承载完整链接。
 pub fn parse_proxy_line(line: &str) -> Option<(String, String, i64, String, String, String)> {
     let line = line.trim();
     if line.is_empty() {
@@ -64,6 +133,10 @@ pub fn parse_proxy_line(line: &str) -> Option<(String, String, i64, String, Stri
     } else {
         ("socks5".to_string(), line)
     };
+    if is_tunnel_protocol(&protocol) {
+        let name = format!("{}-tunnel", protocol);
+        return Some((name, protocol, 0, line.to_string(), String::new(), String::new()));
+    }
     // 去掉路径部分
     let rest = rest.split('/').next().unwrap_or(rest);
     let (userinfo, hostport) = match rest.rsplit_once('@') {
@@ -115,8 +188,15 @@ pub fn bulk_import(text: &str, protocol_default: &str) -> (u32, u32) {
 /// 测速 + 拉公网 IP + geo。返回 (延迟ms, 公网ip, country, region, city, isp)。
 pub async fn check_proxy(proxy: &Proxy, timeout: Duration) -> Result<(f64, String, String, String, String, String), String> {
     let t0 = std::time::Instant::now();
+    // 隧道型: 经本地 mixed 口测 (tunnel_port_for 负责拉起)
+    let proxy_url = if is_tunnel_protocol(&proxy.protocol) {
+        let port = tunnel_port_for(proxy).ok_or("隧道解析失败")?;
+        format!("socks5://127.0.0.1:{port}")
+    } else {
+        proxy.url()
+    };
     let client = reqwest::Client::builder()
-        .proxy(reqwest::Proxy::all(proxy.url()).map_err(|e| e.to_string())?)
+        .proxy(reqwest::Proxy::all(&proxy_url).map_err(|e| e.to_string())?)
         .connect_timeout(timeout)
         .timeout(timeout)
         .build()
