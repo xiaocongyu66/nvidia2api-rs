@@ -1062,7 +1062,7 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                         const fs = [...document.querySelectorAll('iframe')].filter(f => (f.src||'').includes('hcaptcha'));
                         return fs.some(f => f.getBoundingClientRect().width > 250);
                     })()"#,
-                            None as Option<&u8>,
+                            None,
                         )
                         .await
                         .map(|v| v.as_bool().unwrap_or(false))
