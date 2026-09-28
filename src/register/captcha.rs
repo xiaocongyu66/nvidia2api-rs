@@ -555,17 +555,31 @@ fn extract_prompt(data: &Value) -> String {
 }
 
 /// challenge iframe: URL 含 frame=challenge 或 newassets.hcaptcha.com。
+/// wait_ms > 0 时轮询等待 — playwright 的 frame 树对动态 cross-origin iframe
+/// 同步有延迟 (实测), 一次快照可能拿不到。
 async fn find_challenge_frame(page: &playwright_rs::Page) -> Option<playwright_rs::protocol::Frame> {
-    let Ok(frames) = page.frames().await else {
-        return None;
-    };
-    for f in frames {
-        let u = f.url();
-        if u.contains("frame=challenge") || u.contains("newassets.hcaptcha.com") {
-            return Some(f);
+    find_challenge_frame_wait(page, 0).await
+}
+
+async fn find_challenge_frame_wait(
+    page: &playwright_rs::Page,
+    wait_ms: u64,
+) -> Option<playwright_rs::protocol::Frame> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
+    loop {
+        if let Ok(frames) = page.frames().await {
+            for f in frames {
+                let u = f.url();
+                if u.contains("frame=challenge") || u.contains("newassets.hcaptcha.com") {
+                    return Some(f);
+                }
+            }
         }
+        if wait_ms == 0 || tokio::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
-    None
 }
 
 /// 下载一张 tile 图 (2 次重试, 浏览器 UA)。
@@ -713,9 +727,9 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
     };
     println!("[vision] 点击集1: {set:?} (共{}套候选)", sets.len());
 
-    let frame = find_challenge_frame(page)
+    let frame = find_challenge_frame_wait(page, 10_000)
         .await
-        .ok_or("challenge frame not found")?;
+        .ok_or("challenge frame not found (等10s)")?;
     let count = frame.locator(".task-image .image").count().await.unwrap_or(0);
     let sel = if count > 0 { ".task-image .image" } else { ".task-image" };
 
@@ -740,9 +754,9 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
 
 /// 拖拽题: challenge canvas 截图 → CV 求解 → 人类化拖拽手势。
 async fn solve_drag_round(page: &playwright_rs::Page, prompt: &str) -> Result<(), String> {
-    let frame = find_challenge_frame(page)
+    let frame = find_challenge_frame_wait(page, 10_000)
         .await
-        .ok_or("challenge frame not found")?;
+        .ok_or("challenge frame not found (等10s)")?;
     let canvas = frame.locator("canvas");
     if canvas.count().await.unwrap_or(0) == 0 {
         return Err("challenge canvas 未找到".into());
