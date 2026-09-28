@@ -5,6 +5,7 @@ pub mod drag;
 pub mod email;
 pub mod flow;
 pub mod vision;
+pub mod vlm;
 
 use serde_json::{json, Value};
 use std::collections::VecDeque;
