@@ -569,10 +569,10 @@ async fn find_challenge_frame_wait(
     loop {
         // 主路径: page.frames() 快照
         if let Ok(frames) = page.frames().await {
-            for f in frames {
+            for f in &frames {
                 let u = f.url();
                 if u.contains("frame=challenge") || u.contains("newassets.hcaptcha.com") {
-                    return Some(f);
+                    return Some(f.clone());
                 }
             }
             // 备用路径: 主 frame 的 child_frames (frame 树的另一条视图)
