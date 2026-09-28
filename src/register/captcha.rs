@@ -722,8 +722,143 @@ async fn fetch_tile_images(
 
 /// 处理一轮挑战: 路由题型 → 取图 → 分类 → 点 tile → 提交。
 /// 拖拽题走 drag::solve (canvas CV + 人类化拖拽), 网格题走 CLIP 分类。
+/// VLM 主路径 (gpt-pp-team 第 1 层): 整幅挑战图直出答案。
+/// 返回 None = VLM 未配置 (调用方落回 CLIP 启发式)。
+async fn vlm_solve_round(
+    page: &playwright_rs::Page,
+    data: &Value,
+    prompt: &str,
+) -> Option<Result<(), String>> {
+    let cfg = super::vlm::config()?;
+    Some(inner_vlm_solve(page, data, prompt, &cfg).await)
+}
+
+async fn inner_vlm_solve(
+    page: &playwright_rs::Page,
+    data: &Value,
+    prompt: &str,
+    cfg: &super::vlm::VlmConfig,
+) -> Result<(), String> {
+    // 取整幅挑战图: tasklist 拼 3x3 → challenge canvas 截图 → 全页裁 iframe
+    let ua = page
+        .evaluate::<Value, String>("navigator.userAgent", None)
+        .await
+        .unwrap_or_else(|_| "Mozilla/5.0".into());
+    let client = http();
+    let urls: Vec<String> = data["tasklist"]
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .filter_map(|t| t["datapoint_uri"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut grid_png: Option<Vec<u8>> = None;
+    if urls.len() >= 9 {
+        let mut tiles: Vec<Option<Vec<u8>>> = Vec::new();
+        for u in urls.iter().take(9) {
+            tiles.push(download_tile(&client, u, &ua).await);
+        }
+        if tiles.iter().all(|t| t.is_some()) {
+            if let Some(png) = compose_grid_3x3(tiles.iter().map(|t| t.clone().unwrap()).collect()) {
+                println!("[vlm] 挑战图来源: tasklist 9 张拼图");
+                grid_png = Some(png);
+            }
+        }
+    }
+    if grid_png.is_none() {
+        // canvas / 全页裁剪
+        if let Ok((png, _)) = capture_challenge_full(page).await {
+            println!("[vlm] 挑战图来源: 页面截图");
+            grid_png = Some(png);
+        }
+    }
+    let Some(png) = grid_png else {
+        return Err("vlm 取挑战图失败".into());
+    };
+
+    let indices = super::vlm::solve_grid(cfg, &png, prompt).await?;
+    if indices.is_empty() {
+        return Err("vlm 判定无匹配项".into());
+    }
+    click_tiles_and_submit(page, &indices).await
+}
+
+/// 9 张 tile bytes → 3x3 拼图 PNG (每张 160px, 整图 480x480)
+fn compose_grid_3x3(tiles: Vec<Vec<u8>>) -> Option<Vec<u8>> {
+    const S: u32 = 160;
+    let mut canvas = image::RgbImage::new(S * 3, S * 3);
+    for (idx, bytes) in tiles.iter().enumerate() {
+        let img = image::load_from_memory(bytes).ok()?;
+        let resized = img.resize_exact(S, S, image::imageops::FilterType::Lanczos3).to_rgb8();
+        let col = (idx % 3) as u32 * S;
+        let row = (idx / 3) as u32 * S;
+        image::imageops::replace(&mut canvas, &resized, col as i64, row as i64);
+    }
+    let mut buf = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(canvas)
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .ok()?;
+    Some(buf.into_inner())
+}
+
+/// 全页截图裁 challenge iframe (返回 PNG bytes + [x,y,w,h])
+async fn capture_challenge_full(
+    page: &playwright_rs::Page,
+) -> Result<(Vec<u8>, [f64; 4]), String> {
+    let js = r#"(() => {
+        const fs = [...document.querySelectorAll('iframe')].filter(f => {
+            if (!(f.src||'').includes('hcaptcha')) return false;
+            const r = f.getBoundingClientRect();
+            return r.width > 250 && r.height > 400;
+        });
+        if (!fs.length) return null;
+        let best = fs[0];
+        for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
+        const r = best.getBoundingClientRect();
+        return JSON.stringify([r.x, r.y, r.width, r.height]);
+    })()"#;
+    let v = page
+        .evaluate::<Value, Value>(js, None)
+        .await
+        .map_err(|e| format!("iframe rect: {e}"))?;
+    let s = v.as_str().ok_or("challenge iframe 未找到")?;
+    let arr: Vec<f64> = serde_json::from_str(s).map_err(|e| format!("rect: {e}"))?;
+    if arr.len() != 4 {
+        return Err("rect 不完整".into());
+    }
+    let (rx, ry, rw, rh) = (arr[0], arr[1], arr[2], arr[3]);
+    let png = page
+        .screenshot(None)
+        .await
+        .map_err(|e| format!("截图: {e}"))?;
+    let (px, pw, ph) = super::drag::decode_png(&png)?;
+    let img = image::RgbImage::from_raw(pw as u32, ph as u32, px).ok_or("重建失败")?;
+    let crop = image::imageops::crop_imm(
+        &img,
+        rx.clamp(0.0, pw as f64 - 1.0) as u32,
+        ry.clamp(0.0, ph as f64 - 1.0) as u32,
+        rw.min(pw as f64 - rx.max(0.0)) as u32,
+        rh.min(ph as f64 - ry.max(0.0)) as u32,
+    )
+    .to_image();
+    let mut buf = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(crop)
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| format!("编码: {e}"))?;
+    Ok((buf.into_inner(), [rx, ry, rw, rh]))
+}
+
 async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Result<(), String> {
     let mut prompt = extract_prompt(data);
+    // VLM 主路径优先 — 不依赖路由表, 语义推理题型也能解
+    if let Some(vr) = vlm_solve_round(page, data, &prompt).await {
+        match vr {
+            Ok(()) => return Ok(()),
+            Err(e) => println!("[vision] VLM 求解失败, 落回 CLIP: {e}"),
+        }
+    }
     if prompt.is_empty() {
         // 加密响应轮次: prompt 拿不到, 画面可见 — 默认热食语义组 (最常见题型),
         // 置信度低会走 refresh/多轮, 不至于完全躺平
@@ -1243,7 +1378,18 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                         .unwrap_or(false);
                     if challenge_visible {
                         println!("[vision] 加密轮次检测到挑战画面, 截图模式求解");
-                        // 主路径: drag 画布求解 (当前环境主力题型 — banner+拖拽区结构)
+                        // VLM 优先: prompt 为空, VLM 自行看图理解题型
+                        if let Some(vr) = vlm_solve_round(page, &serde_json::json!({"tasklist": []}), "").await {
+                            match vr {
+                                Ok(()) => {
+                                    println!("[vision] 加密轮次 VLM 求解完成");
+                                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                                    continue;
+                                }
+                                Err(e) => println!("[vision] 加密轮次 VLM 失败: {e}"),
+                            }
+                        }
+                        // 次路径: drag 画布 CV 求解
                         match solve_drag_screenshot(page).await {
                             Ok(()) => {
                                 println!("[vision] 加密轮次 drag 截图求解完成");
