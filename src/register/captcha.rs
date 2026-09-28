@@ -663,8 +663,12 @@ async fn fetch_tile_images(
 }
 
 /// 处理一轮挑战: 路由题型 → 取图 → 分类 → 点 tile → 提交。
+/// 拖拽题走 drag::solve (canvas CV + 人类化拖拽), 网格题走 CLIP 分类。
 async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Result<(), String> {
     let prompt = extract_prompt(data);
+    if super::drag::route_drag(&prompt).is_some() {
+        return solve_drag_round(page, &prompt).await;
+    }
     let type_key = super::vision::route_type(&prompt)
         .ok_or_else(|| format!("unsupported prompt: {prompt}"))?;
     println!("[vision] 路由题型: {type_key} (prompt={prompt:?})");
@@ -709,6 +713,94 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
     }
     tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    Ok(())
+}
+
+/// 拖拽题: challenge canvas 截图 → CV 求解 → 人类化拖拽手势。
+async fn solve_drag_round(page: &playwright_rs::Page, prompt: &str) -> Result<(), String> {
+    let frame = find_challenge_frame(page)
+        .await
+        .ok_or("challenge frame not found")?;
+    let canvas = frame.locator("canvas");
+    if canvas.count().await.unwrap_or(0) == 0 {
+        return Err("challenge canvas 未找到".into());
+    }
+    let rect = canvas
+        .bounding_box()
+        .await
+        .map_err(|e| format!("bounding_box: {e}"))?
+        .ok_or("canvas 无 bounding box")?;
+
+    let shot = canvas
+        .screenshot(None)
+        .await
+        .map_err(|e| format!("canvas 截图: {e}"))?;
+    let (px, pw, ph) = super::drag::decode_png(&shot)?;
+    println!("[vision] drag 画布: 截图{pw}x{ph} rect=({:.0},{:.0},{:.0}x{:.0})", rect.x, rect.y, rect.width, rect.height);
+    let sol = super::drag::solve(prompt, &px, pw, ph)?;
+
+    // 截图像素 → 页面坐标 (等比换算)
+    let scale = rect.width / pw as f64;
+    let sx = rect.x + sol.from.0 * scale;
+    let sy = rect.y + sol.from.1 * scale;
+    let ex = rect.x + sol.to.0 * scale;
+    let ey = rect.y + sol.to.1 * scale;
+    println!("[vision] drag: from=({sx:.0},{sy:.0}) → to=({ex:.0},{ey:.0})");
+    human_drag(page, sx, sy, ex, ey).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    Ok(())
+}
+
+/// 人类化拖拽手势 (对齐原版 _human_drag: 预悬停 → 按下 → 三段贝塞尔 → 释放)。
+/// headless Linux 下 down→move→up 可能挂死 (crate 文档), 每次 move 用 tokio timeout 防护。
+async fn safe_mouse_move(
+    page: &playwright_rs::Page,
+    x: f64,
+    y: f64,
+    steps: u32,
+    hover_ms: u64,
+) -> Result<(), String> {
+    let opts = playwright_rs::protocol::MouseOptions::builder().steps(steps).build();
+    let mouse = page.mouse();
+    match tokio::time::timeout(
+        std::time::Duration::from_millis(2500),
+        mouse.move_to(x, y, Some(opts)),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return Err(format!("mouse move: {e}")),
+        Err(_) => println!("[vision] mouse move 超时(挂死防护), 继续"),
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(hover_ms)).await;
+    Ok(())
+}
+
+async fn human_drag(
+    page: &playwright_rs::Page,
+    sx: f64,
+    sy: f64,
+    ex: f64,
+    ey: f64,
+) -> Result<(), String> {
+    safe_mouse_move(page, sx - 12.0, sy - 8.0, 8, 35).await?;
+    safe_mouse_move(page, sx, sy, 6, 60).await?;
+    let mouse = page.mouse();
+    mouse
+        .down(None)
+        .await
+        .map_err(|e| format!("mouse down: {e}"))?;
+    tokio::time::sleep(std::time::Duration::from_millis(90)).await;
+    let (mx1, my1) = (sx + (ex - sx) * 0.35, sy + (ey - sy) * 0.18);
+    let (mx2, my2) = (sx + (ex - sx) * 0.72, sy + (ey - sy) * 0.82);
+    safe_mouse_move(page, mx1, my1, 12, 45).await?;
+    safe_mouse_move(page, mx2, my2, 14, 45).await?;
+    safe_mouse_move(page, ex, ey, 12, 110).await?;
+    mouse
+        .up(None)
+        .await
+        .map_err(|e| format!("mouse up: {e}"))?;
+    tokio::time::sleep(std::time::Duration::from_millis(220)).await;
     Ok(())
 }
 
