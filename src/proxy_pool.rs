@@ -98,7 +98,7 @@ pub fn mark_proxy_fail(proxy_arg: &str) {
         .unwrap_or_default();
     // tunnel_port_for 的端口映射: 端口基数 16000 + 序号, id 序对应 list_all 顺序
     if let Some(&proxy_id) = ids.get((port - 16001) as usize) {
-        let conn = db();
+        // 注意: 复用上方 conn guard — std Mutex 不可重入, 再调 db() 即自死锁
         let _ = conn.execute(
             "UPDATE proxy SET failure_count = failure_count + 1, consecutive_failures = consecutive_failures + 1, \
              status = CASE WHEN consecutive_failures + 1 >= 2 THEN 'cooling' ELSE status END, \
