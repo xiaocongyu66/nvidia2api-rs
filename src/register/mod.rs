@@ -261,7 +261,8 @@ pub fn start(count: u32) -> Result<(), String> {
                     }
                     append_csv(&email, &api_key);
                 }
-                Err(_) => {
+                Err(e) => {
+                    push_log(format!("[✗] 失败: {e}"));
                     let mut st = reg().lock().unwrap();
                     st.done += 1;
                     st.fail += 1;
