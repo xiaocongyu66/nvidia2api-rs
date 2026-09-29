@@ -320,7 +320,7 @@ async fn try_click_hcaptcha_checkbox(page: &playwright_rs::Page) -> bool {
         const cb = fs.find(f => (f.src||'').includes('frame=checkbox')) || fs[0];
         const r = cb.getBoundingClientRect();
         if (r.width <= 0) return null;
-        return JSON.stringify([r.x, r.y, r.width, r.height]);
+        return JSON.stringify([r.x + (window.scrollX||0), r.y + (window.scrollY||0), r.width, r.height]);
     })()"#;
     if let Ok(v) = page.evaluate::<Value, Value>(js_rect, None).await {
         if let Some(s) = v.as_str() {
@@ -604,18 +604,19 @@ async fn find_challenge_frame_wait(
 /// 下载一张 tile 图 (2 次重试, 浏览器 UA)。
 async fn download_tile(client: &reqwest::Client, url: &str, ua: &str) -> Option<Vec<u8>> {
     for _ in 0..2 {
-        if let Ok(resp) = client
+        match client
             .get(url)
             .header("user-agent", ua)
             .timeout(std::time::Duration::from_secs(20))
             .send()
             .await
         {
-            if let Ok(bytes) = resp.bytes().await {
-                if !bytes.is_empty() {
-                    return Some(bytes.to_vec());
-                }
-            }
+            Ok(resp) => match resp.bytes().await {
+                Ok(bytes) if !bytes.is_empty() => return Some(bytes.to_vec()),
+                Ok(_) => eprintln!("[tile] 空响应: {url}"),
+                Err(e) => eprintln!("[tile] body 失败: {e}: {url}"),
+            },
+            Err(e) => eprintln!("[tile] 请求失败: {e}: {url}"),
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
@@ -757,7 +758,7 @@ async fn challenge_iframe_rect(page: &playwright_rs::Page) -> Option<[f64; 4]> {
         let best = fs[0];
         for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
         const r = best.getBoundingClientRect();
-        return JSON.stringify([r.x, r.y, r.width, r.height]);
+        return JSON.stringify([r.x + (window.scrollX||0), r.y + (window.scrollY||0), r.width, r.height]);
     })()"#;
     let v = page.evaluate::<Value, Value>(js, None).await.ok()?;
     let s = v.as_str()?;
@@ -1050,7 +1051,7 @@ async fn capture_challenge_full(
         let best = fs[0];
         for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
         const r = best.getBoundingClientRect();
-        return JSON.stringify([r.x, r.y, r.width, r.height]);
+        return JSON.stringify([r.x + (window.scrollX||0), r.y + (window.scrollY||0), r.width, r.height]);
     })()"#;
     let v = page
         .evaluate::<Value, Value>(js, None)
@@ -1207,7 +1208,7 @@ async fn capture_challenge_tiles(
         let best = fs[0];
         for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
         const r = best.getBoundingClientRect();
-        return JSON.stringify([r.x, r.y, r.width, r.height]);
+        return JSON.stringify([r.x + (window.scrollX||0), r.y + (window.scrollY||0), r.width, r.height]);
     })()"#;
     let v = page
         .evaluate::<Value, Value>(js, None)
@@ -1328,7 +1329,7 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
         let best = fs[0];
         for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
         const r = best.getBoundingClientRect();
-        return JSON.stringify([r.x, r.y, r.width, r.height]);
+        return JSON.stringify([r.x + (window.scrollX||0), r.y + (window.scrollY||0), r.width, r.height]);
     })()"#;
     let v = page
         .evaluate::<Value, Value>(js, None)
@@ -1384,7 +1385,7 @@ async fn solve_drag_screenshot(page: &playwright_rs::Page) -> Result<(), String>
         let best = fs[0];
         for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
         const r = best.getBoundingClientRect();
-        return JSON.stringify([r.x, r.y, r.width, r.height]);
+        return JSON.stringify([r.x + (window.scrollX||0), r.y + (window.scrollY||0), r.width, r.height]);
     })()"#;
     let v = page
         .evaluate::<Value, Value>(js, None)
