@@ -162,7 +162,7 @@ pub async fn register_one(
     let result: Result<String, String> = async {
         // [2] build.nvidia.com
         log(&logf, "[2] 打开 build.nvidia.com…");
-        let _ = page.goto("https://build.nvidia.com/", None).await;
+        goto_guarded(&page, "https://build.nvidia.com/").await;
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         let cookie = page.locator("#onetrust-accept-btn-handler");
         if cookie.count().await.unwrap_or(0) > 0 {
@@ -424,7 +424,7 @@ pub async fn register_one(
             // chrome-error 页 = 跳转链某跳加载失败, 重导航把流程接回去 (对齐 zseek)
             if url_now.starts_with("chrome-error") || url_now.contains("chrome-error://") {
                 log(&logf, "[8] 页面加载失败, 重开 build.nvidia.com 恢复流程…");
-                let _ = page.goto("https://build.nvidia.com/", None).await;
+                goto_guarded(&page, "https://build.nvidia.com/").await;
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 last_url.clear();
                 continue;
@@ -466,6 +466,19 @@ pub async fn register_one(
             Err(e)
         }
     }
+}
+
+/// goto 挂死防护: proot 下 CDP 导航可能永久挂起 (实测批次冻死 8.5h), 60s 强制超时
+async fn goto_guarded(page: &playwright_rs::Page, url: &str) {
+    match tokio::time::timeout(std::time::Duration::from_secs(60), page.goto(url, None)).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => log_eprintln(&format!("[warn] goto 失败: {e}")),
+        Err(_) => log_eprintln("[warn] goto 60s 超时 (挂死防护), 继续"),
+    }
+}
+
+fn log_eprintln(msg: &str) {
+    eprintln!("{msg}");
 }
 
 async fn poll_code(cfg: &FlowConfig, inbox: &Inbox, timeout_secs: u64) -> Option<String> {
