@@ -504,10 +504,12 @@ pub async fn solve_adaptive(
          (a) a 3x3 grid of tiles (number them 1-9 row-major, top-left = 1) or \
          (b) a drag challenge (drag a piece/letter from its source to the target slot). \
          Challenge prompt: {p}. If the prompt is unavailable, read it from the image. \
-         IMPORTANT for grid challenges: if the prompt mentions a 'sample'/'example'/'reference' \
-         item (e.g. 'weighs less than the animal in the sample'), that sample tile is a \
-         REFERENCE for comparison — do NOT select it; compare every other tile against it. \
-         'less than the animal' means find tiles whose item is lighter than the sample animal. \
+         METHOD for grid challenges: (1) silently identify the concrete object/scene in \
+         EVERY tile; (2) interpret the prompt's semantic requirement; (3) select ONLY the \
+         tiles whose object matches it — e.g. for 'things you use to plant a garden' pick \
+         shovels/buckets/gloves/seeds and NEVER pencils, bulbs, electronics or drawings. \
+         If the prompt mentions a 'sample'/'example'/'reference' item, that tile is a \
+         REFERENCE for comparison — do NOT select it. \
          For a grid challenge respond ONLY: {{\"type\":\"grid\",\"selected\":[tile numbers]}} \
          (empty list if nothing matches). \
          For a drag challenge respond ONLY: {{\"type\":\"drag\",\"from\":[x,y],\"to\":[x,y]}} \
