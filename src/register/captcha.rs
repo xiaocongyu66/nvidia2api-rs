@@ -827,7 +827,14 @@ async fn inner_vlm_solve(
         Err(((fx, fy), (tx, ty))) => {
             // 拖拽: 归一化坐标 → iframe 像素坐标 (挑战图为裁剪区域)
             let (_, [rx, ry, _, _]) = last_vlm_region();
-            human_drag(page, rx + fx * 480.0, ry + fy * 480.0, rx + tx * 480.0, ry + ty * 480.0).await
+            let (sx, sy) = (rx + fx * 480.0, ry + fy * 480.0);
+            let (ex, ey) = (rx + tx * 480.0, ry + ty * 480.0);
+            // from == to → point 题型 (单场景点物体): 单击目标中心
+            if ((sx - ex).abs() + (sy - ey).abs()) < 20.0 {
+                println!("[vision] point 题型: 单击 ({sx:.0},{sy:.0})");
+                return human_click_xy(page, sx, sy).await;
+            }
+            human_drag(page, sx, sy, ex, ey).await
         }
     }
 }
@@ -1595,6 +1602,24 @@ async fn human_drag(
         .await
         .map_err(|e| format!("mouse up: {e}"))?;
     tokio::time::sleep(std::time::Duration::from_millis(220)).await;
+    Ok(())
+}
+
+/// 人类化单击 (point 题型: 悬停→按下→抬起, 带 1px 抖动)。
+async fn human_click_xy(page: &playwright_rs::Page, x: f64, y: f64) -> Result<(), String> {
+    safe_mouse_move(page, x - 8.0, y - 5.0, 7, 40).await?;
+    safe_mouse_move(page, x, y, 5, 70).await?;
+    let mouse = page.mouse();
+    mouse
+        .down(None)
+        .await
+        .map_err(|e| format!("mouse down: {e}"))?;
+    tokio::time::sleep(std::time::Duration::from_millis(85)).await;
+    mouse
+        .up(None)
+        .await
+        .map_err(|e| format!("mouse up: {e}"))?;
+    tokio::time::sleep(std::time::Duration::from_millis(240)).await;
     Ok(())
 }
 

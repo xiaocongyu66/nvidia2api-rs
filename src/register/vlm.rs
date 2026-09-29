@@ -521,6 +521,11 @@ pub async fn solve_adaptive(
          with normalized 0-1 coordinates — IMPORTANT: from = the movable PIECE (usually on \
          the RIGHT side), to = the empty slot/hole on the LEFT side. Look for the left-side \
          object with a visible missing wedge/section and the right-side matching piece. \
+         If the prompt says 'Click the character/object/animal ...' and the image is ONE \
+         full scene (not separate tiles), respond ONLY: \
+         {{\"type\":\"point\",\"x\":x,\"y\":y}} — the CENTER of the requested object, \
+         normalized 0-1 (e.g. prompt 'partly blocked by a line' = the character a line \
+         passes through). \
          No markdown, no explanation."
     );
     let decision = chat_completion(
@@ -535,6 +540,17 @@ pub async fn solve_adaptive(
         decision.raw_text.chars().take(150).collect::<String>()
     );
     let t = decision.parsed["type"].as_str().unwrap_or("grid");
+    if t == "point" {
+        let (w, h) = (480.0f64, 480.0f64);
+        let pt = parse_point(
+            &serde_json::json!([decision.parsed["x"], decision.parsed["y"]]),
+            w,
+            h,
+        )?;
+        println!("[vlm] 题型自适应: point ({pt:.2?}) — 单场景点物体");
+        // from == to → captcha.rs 侧按单击处理
+        return Ok(Err((pt, pt)));
+    }
     if t == "drag" {
         let (w, h) = (480.0f64, 480.0f64);
         let from = parse_point(
