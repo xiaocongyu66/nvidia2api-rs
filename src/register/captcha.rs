@@ -556,8 +556,12 @@ fn extract_prompt(data: &Value) -> String {
             }
         }
     }
-    String::new()
+    // 加密轮: prompt 拿不到 — 复用最近一次明文轮的 prompt
+    // (同一挑战的加密/明文轮交替, 题目相同)
+    LAST_PROMPT.lock().unwrap().clone().unwrap_or_default()
 }
+
+static LAST_PROMPT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 /// challenge iframe: URL 含 frame=challenge 或 newassets.hcaptcha.com。
 /// wait_ms > 0 时轮询等待 — playwright 的 frame 树对动态 cross-origin iframe
@@ -1142,6 +1146,9 @@ async fn capture_challenge_full(
 
 async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Result<(), String> {
     let mut prompt = extract_prompt(data);
+    if !prompt.is_empty() {
+        *LAST_PROMPT.lock().unwrap() = Some(prompt.clone());
+    }
     // VLM 主路径优先 — 不依赖路由表, 语义推理题型也能解
     if let Some(vr) = vlm_solve_round(page, data, &prompt).await {
         match vr {
