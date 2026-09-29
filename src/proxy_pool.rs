@@ -52,27 +52,61 @@ pub fn tunnel_port_for(proxy: &Proxy) -> Option<u16> {
     Some(port)
 }
 
-/// chromium --proxy-server 参数: 优先隧道 (本地 mixed 口), 否则常规代理直填。
+/// 轮换计数器: 每次取代理 +1, 批次间自动换节点 (不再固定第一条)
+static NEXT_PROXY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// chromium --proxy-server 参数: enabled 节点中轮换选择, 跳过冷却中的;
+/// 隧道走本地 mixed 口, 常规代理直填。
 pub fn chromium_proxy_arg() -> Option<String> {
-    for p in list_all() {
-        if !p.enabled {
-            continue;
-        }
-        if is_tunnel_protocol(&p.protocol) {
-            if let Some(port) = tunnel_port_for(&p) {
-                return Some(format!("--proxy-server=socks5://127.0.0.1:{port}"));
-            }
-            continue;
-        }
-        // host:port 型: 组标准代理 URL
-        let auth = if p.username.is_empty() {
-            String::new()
-        } else {
-            format!("{}:{}@", p.username, p.password)
-        };
-        return Some(format!("--proxy-server={}://{}{}:{}", p.protocol, auth, p.host, p.port));
+    use std::sync::atomic::Ordering;
+    let now = chrono::Utc::now().naive_utc();
+    // 只考虑 enabled 且未在冷却中的
+    let candidates: Vec<Proxy> = list_all()
+        .into_iter()
+        .filter(|p| p.enabled && p.cooldown_until.map(|c| c <= now).unwrap_or(true))
+        .collect();
+    if candidates.is_empty() {
+        return None;
     }
-    None
+    let idx = NEXT_PROXY.fetch_add(1, Ordering::Relaxed) % candidates.len();
+    let p = &candidates[idx];
+    if is_tunnel_protocol(&p.protocol) {
+        if let Some(port) = tunnel_port_for(p) {
+            return Some(format!("--proxy-server=socks5://127.0.0.1:{port}"));
+        }
+        return None;
+    }
+    let auth = if p.username.is_empty() {
+        String::new()
+    } else {
+        format!("{}:{}@", p.username, p.password)
+    };
+    Some(format!("--proxy-server={}://{}{}:{}", p.protocol, auth, p.host, p.port))
+}
+
+/// 注册批次节点失败: 记入冷却统计, 连败到阈值自动切换下一节点
+pub fn mark_proxy_fail(proxy_arg: &str) {
+    // proxy_arg 形如 --proxy-server=socks5://127.0.0.1:PORT 或 host 型, 反查节点 id
+    let port = proxy_arg
+        .strip_prefix("--proxy-server=socks5://127.0.0.1:")
+        .and_then(|s| s.parse::<i64>().ok());
+    let Some(port) = port else { return };
+    let conn = db();
+    let ids: Vec<i64> = conn
+        .prepare("SELECT id FROM proxy WHERE enabled = 1")
+        .and_then(|mut s| s.query_map([], |r| r.get(0)).map(|i| i.flatten().collect()))
+        .unwrap_or_default();
+    // tunnel_port_for 的端口映射: 端口基数 16000 + 序号, id 序对应 list_all 顺序
+    if let Some(&proxy_id) = ids.get((port - 16001) as usize) {
+        let conn = db();
+        let _ = conn.execute(
+            "UPDATE proxy SET failure_count = failure_count + 1, consecutive_failures = consecutive_failures + 1, \
+             status = CASE WHEN consecutive_failures + 1 >= 2 THEN 'cooling' ELSE status END, \
+             cooldown_until = datetime('now', '+1800 seconds') WHERE id = ?1",
+            rusqlite::params![proxy_id],
+        );
+        eprintln!("[proxy] 节点 {proxy_id} 记入冷却 30min (注册失败)");
+    }
 }
 
 /// 服务启动预热: 拉起所有 enabled 隧道的本地 mixed 监听

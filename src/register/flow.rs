@@ -123,9 +123,11 @@ pub async fn register_one(
         "--lang=zh-CN".to_string(),
         "--disable-dev-shm-usage".to_string(),
     ];
+    let mut used_proxy: Option<String> = None;
     if let Some(p) = crate::proxy_pool::chromium_proxy_arg() {
         log(&logf, &format!("[proxy] chromium 走代理: {p}"));
-        args.push(p);
+        args.push(p.clone());
+        used_proxy = Some(p);
     }
     // headed 真浏览器 (Xvfb 虚拟显示) — headless 的 UA/plugins/chrome 对象/permissions
     // 全是可检测特征 (sannysoft 10 项 FAIL), headed 全 PASS。有 DISPLAY 即 headed。
@@ -464,6 +466,10 @@ pub async fn register_one(
         }
         Err(e) => {
             log(&logf, &format!("[✗] {email}: {e}"));
+            // 注册失败计入节点冷却统计, 连败自动轮换下一节点
+            if let Some(ref pa) = used_proxy {
+                crate::proxy_pool::mark_proxy_fail(pa);
+            }
             Err(e)
         }
     }
