@@ -732,6 +732,39 @@ fn last_vlm_region() -> ((), [f64; 4]) {
     )
 }
 
+/// point 类 prompt: 单场景点物体 (非格子选择, 答案=物体中心坐标)。
+fn is_point_prompt(prompt: &str) -> bool {
+    let p = prompt.to_lowercase();
+    (p.contains("click the") || p.contains("click on the"))
+        && (p.contains("character") || p.contains("object") || p.contains("animal")
+            || p.contains("creature") || p.contains("person") || p.contains("one that"))
+        && !p.contains("select all") && !p.contains("click all")
+}
+
+/// challenge iframe 页面坐标 (轻量, 只跑 rect js 不截图)。
+async fn challenge_iframe_rect(page: &playwright_rs::Page) -> Option<[f64; 4]> {
+    let js = r#"(() => {
+        const fs = [...document.querySelectorAll('iframe')].filter(f => {
+            if (!(f.src||'').includes('hcaptcha')) return false;
+            const r = f.getBoundingClientRect();
+            return r.width > 250 && r.height > 400;
+        });
+        if (!fs.length) return null;
+        let best = fs[0];
+        for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
+        const r = best.getBoundingClientRect();
+        return JSON.stringify([r.x, r.y, r.width, r.height]);
+    })()"#;
+    let v = page.evaluate::<Value, Value>(js, None).await.ok()?;
+    let s = v.as_str()?;
+    let arr: Vec<f64> = serde_json::from_str(s).ok()?;
+    if arr.len() == 4 {
+        Some([arr[0], arr[1], arr[2], arr[3]])
+    } else {
+        None
+    }
+}
+
 /// VLM 主路径 (gpt-pp-team 第 1 层): 整幅挑战图直出答案。
 /// 返回 None = VLM 未配置 (调用方落回 CLIP 启发式)。
 async fn vlm_solve_round(
@@ -763,10 +796,15 @@ async fn inner_vlm_solve(
                 .collect()
         })
         .unwrap_or_default();
+    let point_mode = is_point_prompt(prompt);
+    if point_mode {
+        println!("[vision] point 类 prompt: 单图模式 (不拼格子)");
+    }
 
     let mut grid_png: Option<Vec<u8>> = None;
     // tasklist 2-9 张全部下载原图拼动态网格 (明文轮数据完整喂 VLM; 截图轮常是加载中)
-    if urls.len() >= 2 && urls.len() <= 9 {
+    // point 类不拼格子 — 第一张原图即完整场景, 拼了 VLM 会按选格子答必错
+    if !point_mode && urls.len() >= 2 && urls.len() <= 9 {
         let mut tiles: Vec<Option<Vec<u8>>> = Vec::new();
         for u in urls.iter().take(9) {
             tiles.push(download_tile(&client, u, &ua).await);
@@ -776,6 +814,22 @@ async fn inner_vlm_solve(
             if let Some(png) = compose_grid_dynamic(&bytes) {
                 println!("[vlm] 挑战图来源: tasklist {} 张拼图", bytes.len());
                 grid_png = Some(png);
+            }
+        }
+    }
+    if grid_png.is_none() {
+        if point_mode {
+            // point 类: 第一张原图即场景 (datapoint_uri 全图)
+            // VLM_REGION 设为挑战图显示区 (iframe rect + 网格偏移), 供 point 坐标换算
+            if let Some(u) = urls.first() {
+                if let Some(t) = download_tile(&client, u, &ua).await {
+                    println!("[vlm] 挑战图来源: point 单原图");
+                    if let Some([rx, ry, rw, _rh]) = challenge_iframe_rect(page).await {
+                        let tile = (rw - 40.0) / 3.0;
+                        *VLM_REGION.lock().unwrap() = Some([rx + 20.0, ry + 90.0, tile * 3.0, tile * 3.0]);
+                    }
+                    grid_png = Some(t);
+                }
             }
         }
     }
@@ -825,13 +879,15 @@ async fn inner_vlm_solve(
             click_tiles_and_submit(page, &indices).await
         }
         Err(((fx, fy), (tx, ty))) => {
-            // 拖拽: 归一化坐标 → iframe 像素坐标 (挑战图为裁剪区域)
-            let (_, [rx, ry, _, _]) = last_vlm_region();
-            let (sx, sy) = (rx + fx * 480.0, ry + fy * 480.0);
-            let (ex, ey) = (rx + tx * 480.0, ry + ty * 480.0);
+            // 拖拽/点选: 归一化坐标 → 物理坐标
+            // VLM 看到的图可能是 tasklist 原图 (宽高不定) 或截图区域 — 统一按 VLM_REGION rect:
+            // rect=[x,y,w,h] 是挑战图在页面上的区域, 归一化坐标 × (w,h) + (x,y) 即点击点
+            let (_, [rx, ry, rw, rh]) = last_vlm_region();
+            let (sx, sy) = (rx + fx * rw.max(1.0), ry + fy * rh.max(1.0));
+            let (ex, ey) = (rx + tx * rw.max(1.0), ry + ty * rh.max(1.0));
             // from == to → point 题型 (单场景点物体): 单击目标中心
             if ((sx - ex).abs() + (sy - ey).abs()) < 20.0 {
-                println!("[vision] point 题型: 单击 ({sx:.0},{sy:.0})");
+                println!("[vision] point 题型: 单击 ({sx:.0},{sy:.0}) rect=({rx:.0},{ry:.0},{rw:.0},{rh:.0})");
                 return human_click_xy(page, sx, sy).await;
             }
             human_drag(page, sx, sy, ex, ey).await
