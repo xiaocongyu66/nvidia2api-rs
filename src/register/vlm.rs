@@ -518,7 +518,10 @@ pub async fn solve_adaptive(
          For a grid challenge respond ONLY: {{\"type\":\"grid\",\"selected\":[tile numbers]}} \
          (empty list if nothing matches). \
          For a drag challenge respond ONLY: {{\"type\":\"drag\",\"from\":[x,y],\"to\":[x,y]}} \
-         with normalized 0-1 coordinates. No markdown, no explanation."
+         with normalized 0-1 coordinates — IMPORTANT: from = the movable PIECE (usually on \
+         the RIGHT side), to = the empty slot/hole on the LEFT side. Look for the left-side \
+         object with a visible missing wedge/section and the right-side matching piece. \
+         No markdown, no explanation."
     );
     let decision = chat_completion(
         cfg,
