@@ -59,11 +59,11 @@ static NEXT_PROXY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsi
 /// 隧道走本地 mixed 口, 常规代理直填。
 pub fn chromium_proxy_arg() -> Option<String> {
     use std::sync::atomic::Ordering;
-    let now = chrono::Utc::now().naive_utc();
-    // 只考虑 enabled 且未在冷却中的
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    // 只考虑 enabled 且未在冷却中的 (cooldown_until 为 ISO 字符串, 字典序=时间序)
     let candidates: Vec<Proxy> = list_all()
         .into_iter()
-        .filter(|p| p.enabled && p.cooldown_until.map(|c| c <= now).unwrap_or(true))
+        .filter(|p| p.enabled && p.cooldown_until.as_deref().map(|c| c.as_str() <= now.as_str()).unwrap_or(true))
         .collect();
     if candidates.is_empty() {
         return None;
