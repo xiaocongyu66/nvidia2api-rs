@@ -248,28 +248,29 @@ pub async fn register_one(
         }
         tokio::time::sleep(std::time::Duration::from_secs(4)).await;
 
-        // [5] 填密码 (iframe 内) — 人类化打字
+        // [5] 填密码 — 两坑: ①风控下表单 30s 才渲染(实测), 等 75s ②邮箱提交后整页跳转
+        //      login.nvgs.nvidia.com, 密码表单在新主页面, 必须跨 frame 重找(旧 form_frame 已消亡)
         log(&logf, "[5] 填写密码…");
-        let deadline = now() + std::time::Duration::from_secs(30);
-        let mut appeared = false;
+        let deadline = now() + std::time::Duration::from_secs(75);
+        let mut pw_frame: Option<playwright_rs::protocol::Frame> = None;
         while now() < deadline {
-            if form_frame.locator("#registration_password").count().await.unwrap_or(0) > 0 {
-                appeared = true;
+            if let Some(f) = find_frame_with(&page, "#registration_password").await {
+                pw_frame = Some(f);
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
-        if !appeared {
+        let Some(pw_frame) = pw_frame else {
             return Err("password field never appeared".into());
-        }
-        let pw_input = form_frame.locator("#registration_password").first();
+        };
+        let pw_input = pw_frame.locator("#registration_password").first();
         if captcha::human_click_locator(&page, &pw_input).await.is_err() {
             let _ = pw_input.click(None).await;
         }
         if captcha::human_type(&page, &password).await.is_err() {
             let _ = pw_input.fill(&password, None).await;
         }
-        let pw_confirm = form_frame.locator("#registration_passwordConfirm").first();
+        let pw_confirm = pw_frame.locator("#registration_passwordConfirm").first();
         if captcha::human_click_locator(&page, &pw_confirm).await.is_err() {
             let _ = pw_confirm.click(None).await;
         }
