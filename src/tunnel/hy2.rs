@@ -12,6 +12,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 const FRAME_TCP_REQUEST: u64 = 0x401;
 const AUTH_OK_STATUS: u16 = 233;
 
+#[derive(Clone)]
 pub struct Hy2Target {
     pub server: String,
     pub port: u16,
@@ -40,7 +41,23 @@ impl Hy2Target {
     }
 
     pub async fn dial(&self, host: &str, port: u16) -> Result<BoxStream, String> {
-        let (conn, ctrl) = pooled_conn(self).await?;
+        // QUIC 隔离: quinn 在 proot 下的 UDP 阻塞会冻死主 runtime (实测 healthz 冻结而隧道
+        // 数据仍在流动) — quinn 操作全部跑专用 runtime, 主 runtime 只拿流句柄
+        let t = self.clone();
+        let host = host.to_string();
+        quic_rt()
+            .spawn(async move { dial_inner(&t, &host, port).await })
+            .await
+            .map_err(|e| format!("quic rt join: {e}"))?
+    }
+}
+
+async fn dial_inner(
+    t: &Hy2Target,
+    host: &str,
+    port: u16,
+) -> Result<BoxStream, String> {
+        let (conn, ctrl) = pooled_conn(t).await?;
         // TCP 请求帧: varint 0x401 + varint addrLen + "host:port" 文本 + varint padLen(0)
         // (hysteria2 传 txthinking socks5 Request.Address() = 文本形式; IPv6 需方括号)
         let addr = text_addr(host, port);
@@ -82,6 +99,19 @@ impl Hy2Target {
             read_fut: None,
         }))
     }
+
+/// QUIC 专用 runtime — quinn driver/endpoint 生命周期都在此, 隔离主 runtime
+static QUIC_RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+
+fn quic_rt() -> &'static tokio::runtime::Runtime {
+    QUIC_RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_name("quic-rt")
+            .enable_all()
+            .build()
+            .expect("quic runtime")
+    })
 }
 
 pub struct Hy2Io {
