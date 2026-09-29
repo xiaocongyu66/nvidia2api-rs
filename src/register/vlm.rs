@@ -165,9 +165,13 @@ pub async fn chat_completion(
         .map_err(|e| format!("vlm client: {e}"))?;
     let url = format!("{}/chat/completions", cfg.base_url);
 
-    let attempts = if claude { 2 } else { 1 };
+    // VLM 端点间歇超时 (vllm 负载抖动, 实测一次挂后秒恢复) — 3 次重试+递增间隔
+    let attempts = 3;
     let mut last_err = String::new();
     for attempt in 0..attempts {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(800 * attempt as u64)).await;
+        }
         let resp = client
             .post(&url)
             .header("Authorization", format!("Bearer {}", cfg.api_key))
@@ -178,6 +182,7 @@ pub async fn chat_completion(
             Ok(r) => r,
             Err(e) => {
                 last_err = format!("vlm 请求: {e}");
+                eprintln!("[vlm] 请求失败 {attempt}/{attempts}: {e}");
                 continue;
             }
         };
