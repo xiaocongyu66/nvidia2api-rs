@@ -222,6 +222,14 @@ pub async fn register_one(
                 .await
                 .unwrap_or_default();
             log(&logf, &format!("[diag] body 文本长度: {body_len}"));
+            let head = page
+                .evaluate::<serde_json::Value, String>(
+                    "(() => document.body ? document.body.innerText.replace(/\\s+/g,' ').slice(0, 180) : '')()",
+                    None,
+                )
+                .await
+                .unwrap_or_default();
+            log(&logf, &format!("[diag] body 开头: {head}"));
             match btns {
                 Ok(v) => log(&logf, &format!("[diag] 页面元素: {}", v)),
                 Err(e) => log(&logf, &format!("[diag] dump 失败: {e}")),
