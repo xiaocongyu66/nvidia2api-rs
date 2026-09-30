@@ -292,7 +292,9 @@ pub async fn register_one(
             }
             if let Err(e) = captcha::solve_and_inject(&page, &cfg.solver).await {
                 log(&logf, &format!("[6] captcha: {e}"));
-                continue;
+                // 不 continue — create-account 的 hCaptcha 常为静默模式 (无挑战弹出,
+                // 表单提交时自动验证): 直接点注册按钮让页面自己拿 token
+                log(&logf, "[6] captcha 未过, 尝试静默模式直接提交…");
             }
             // 挂响应监听再点击
             captcha::watch_register_response(&page).await;
