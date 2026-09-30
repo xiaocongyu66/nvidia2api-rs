@@ -1860,6 +1860,20 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                     if let Ok(v) = page.evaluate::<Value, Value>(js, None).await {
                         println!("[vision] DOM 探针: {v}");
                     }
+                    // checkbox 卡死现场截图 (frames() 看不到 iframe 但 DOM 有 — 看渲染真相)
+                    if checkbox_ticks == 16 {
+                        let shot = page.screenshot(None).await;
+                        if let Ok(bytes) = shot {
+                            let p = std::path::Path::new("data/debug/checkbox_stuck.png");
+                            let _ = std::fs::create_dir_all(p.parent().unwrap());
+                            match std::fs::write(p, &bytes) {
+                                Ok(_) => println!("[vision] checkbox 卡死截图已存: {} ({}B)", p.display(), bytes.len()),
+                                Err(e) => println!("[vision] 截图写入失败: {e}"),
+                            }
+                        } else if let Err(e) = shot {
+                            println!("[vision] 截图失败: {e}");
+                        }
+                    }
                 }
                 // 加密响应轮次: 槽空但挑战画面存在 → 截图模式直接分类
                 // (prompt 未知, 先用最常见的热食语义组; 置信度低会走 refresh 换题)
