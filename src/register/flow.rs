@@ -122,6 +122,13 @@ pub async fn register_one(
         "--disable-blink-features=AutomationControlled".to_string(),
         "--lang=zh-CN".to_string(),
         "--disable-dev-shm-usage".to_string(),
+        // 防自动化特征 (与 init script 配合)
+        "--disable-features=IsolateOrigins,site-per-process".to_string(),
+        "--no-first-run".to_string(),
+        "--no-default-browser-check".to_string(),
+        "--disable-infobars".to_string(),
+        "--window-size=1280,720".to_string(),
+        "--start-maximized".to_string(),
     ];
     let mut used_proxy: Option<String> = None;
     if let Some(p) = crate::proxy_pool::chromium_proxy_arg() {

@@ -102,6 +102,50 @@ pub async fn capture_sitekey(page: &playwright_rs::Page) -> Option<String> {
 /// 在 create-account 页加载前注入 hCaptcha 拦截 hook (对齐原版 _ensure_hcaptcha_hook)。
 pub async fn ensure_hcaptcha_hook(page: &playwright_rs::Page) {
     const HOOK: &str = r#"(() => {
+        // ---- stealth 指纹伪装 (hCaptcha checkbox 无响应的根因修复) ----
+        // navigator.webdriver 隐藏 (disable-blink-features 不移除属性本身, 必查项)
+        try { Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); } catch (e) {}
+        // languages / plugins (0 plugins 是 headless 特征)
+        try { Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en-US', 'en']}); } catch (e) {}
+        try {
+            const fakePlugins = {length: 5, 0: {name: 'Chrome PDF Viewer'}, 1: {name: 'Chromium PDF Viewer'},
+                2: {name: 'Native Client'}, 3: {name: 'Chromium PDF Plugin'}, 4: {name: 'Chromium PDF Viewer'},
+                item: function(i) { return this[i]; }, namedItem: function(n) { return null; },
+                refresh: function() {}};
+            Object.defineProperty(navigator, 'plugins', {get: () => fakePlugins});
+        } catch (e) {}
+        // chrome runtime 对象 (chromium 缺失是可检测特征)
+        try {
+            window.chrome = window.chrome || {};
+            window.chrome.runtime = window.chrome.runtime || {connect: function() {}, sendMessage: function() {}};
+            window.chrome.loadTimes = window.chrome.loadTimes || function() { return {}; };
+            window.chrome.csi = window.chrome.csi || function() { return {}; };
+        } catch (e) {}
+        // WebGL vendor/renderer 伪装 (ARM 无 GPU → SwiftShader 是大特征)
+        try {
+            const fakeVendor = 'Intel Inc.', fakeRenderer = 'Intel Iris OpenGL Engine';
+            const wrap = (proto) => {
+                const orig = proto.getParameter;
+                proto.getParameter = function(p) {
+                    if (p === 37445) return fakeVendor;
+                    if (p === 37446) return fakeRenderer;
+                    return orig.call(this, p);
+                };
+            };
+            if (window.WebGLRenderingContext) wrap(WebGLRenderingContext.prototype);
+            if (window.WebGL2RenderingContext) wrap(WebGL2RenderingContext.prototype);
+        } catch (e) {}
+        // permissions.query 伪装 (notifications 默认 prompt, 自动化常返回 denied)
+        try {
+            const origQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = function(p) {
+                if (p && p.name === 'notifications') {
+                    return Promise.resolve({state: Notification.permission, onchange: null});
+                }
+                return origQuery.call(this, p);
+            };
+        } catch (e) {}
+
         window.__hCaptchaInjectedToken = null;
         const suppressWhenInjected = (originalCallback, callbackName) => function(...args) {
             if (window.__hCaptchaInjectedToken) {
