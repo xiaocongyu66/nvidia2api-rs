@@ -517,6 +517,11 @@ pub async fn solve_adaptive(
          shovels/buckets/gloves/seeds and NEVER pencils, bulbs, electronics or drawings. \
          If the prompt mentions a 'sample'/'example'/'reference' item, that tile is a \
          REFERENCE for comparison — do NOT select it. \
+         SPECIAL RULE for 'weighs less than the animal in the sample': tile 1 (top-left) \
+         shows the sample ANIMAL. Compare body mass: anything lighter than that animal gets \
+         selected. Large/heavy animals (elephant, rhino, hippo, whale, bear, horse, cow, \
+         giraffe) are NOT selected; food, household objects, vehicles, people, small \
+         animals (cat, dog, bird, rabbit) ARE selected. \
          For a grid challenge respond ONLY: {{\"type\":\"grid\",\"selected\":[tile numbers]}} \
          (empty list if nothing matches). \
          For a drag challenge respond ONLY: {{\"type\":\"drag\",\"from\":[x,y],\"to\":[x,y]}} \
