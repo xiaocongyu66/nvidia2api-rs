@@ -678,7 +678,8 @@ async fn find_challenge_frame_wait(
 
 /// 下载一张 tile 图 (2 次重试, 浏览器 UA)。
 async fn download_tile(client: &reqwest::Client, url: &str, ua: &str) -> Option<Vec<u8>> {
-    for _ in 0..2 {
+    // 网络抖动常态 (设备 Wi-Fi 波动): 重试 4 次 + 间隔递增
+    for attempt in 0..4 {
         match client
             .get(url)
             .header("user-agent", ua)
@@ -693,7 +694,7 @@ async fn download_tile(client: &reqwest::Client, url: &str, ua: &str) -> Option<
             },
             Err(e) => eprintln!("[tile] 请求失败: {e}: {url}"),
         }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(500 * (attempt as u64 + 1))).await;
     }
     None
 }
@@ -930,9 +931,19 @@ async fn inner_vlm_solve(
         for u in urls.iter().take(9) {
             tiles.push(download_tile(&client, u, &ua).await);
         }
+        // 采集放宽: 部分 tile 成功也存档 (网络抖动常态, 9 张全成才采会漏题族);
+        // 拼图仍要求全 (VLM 输入需完整网格)
+        let got: Vec<(usize, Vec<u8>)> = tiles
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| t.clone().map(|b| (i, b)))
+            .collect();
+        if !got.is_empty() {
+            let refs: Vec<Vec<u8>> = got.iter().map(|(_, b)| b.clone()).collect();
+            collect_training(&refs, prompt, data);
+        }
         if tiles.iter().all(|t| t.is_some()) {
             let bytes: Vec<Vec<u8>> = tiles.iter().map(|t| t.clone().unwrap()).collect();
-            collect_training(&bytes, prompt, data);
             if let Some(png) = compose_grid_dynamic(&bytes) {
                 println!("[vlm] 挑战图来源: tasklist {} 张拼图", bytes.len());
                 grid_png = Some(png);
