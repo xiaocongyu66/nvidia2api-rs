@@ -154,6 +154,8 @@ pub async fn chat_completion(
             {"role": "user", "content": content},
         ],
         "max_tokens": 3072,
+        // Qwen3.8 系: 关思考模式 — 实测 2s 直出 JSON (开思考 12s+答案埋 reasoning)
+        "chat_template_kwargs": {"enable_thinking": false},
     });
     if !claude {
         payload["response_format"] = serde_json::json!({"type": "json_object"});
