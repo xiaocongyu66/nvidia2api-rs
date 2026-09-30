@@ -199,6 +199,16 @@ pub async fn register_one(
                 let _ = txt.first().click(None).await;
             }
         }
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // 兜底: 登录入口常为 <a> 链接 (role=button 匹配不到) — href 含 login 的直接跳
+        if find_frame_with(&page, "input[name=\"email\"]").await.is_none() {
+            let js = r#"(() => { const a = [...document.querySelectorAll('a')].find(x => /login|signin|auth/i.test((x.href||'') + (x.innerText||''))); if (a) { a.click(); return a.href; } return ''; })()"#;
+            if let Ok(href) = page.evaluate::<Value, String>(js, None).await {
+                if !href.is_empty() {
+                    log(&logf, &format!("[3] <a> 登录链接点击: {href}"));
+                }
+            }
+        }
         // 等弹窗 (SSO iframe) 渲染: 跨 frame 找 email input
         let deadline = now() + std::time::Duration::from_secs(20);
         let mut form_frame: Option<playwright_rs::protocol::Frame> = None;
