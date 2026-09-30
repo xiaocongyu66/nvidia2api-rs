@@ -33,6 +33,28 @@ static REGISTER_STATUS: Mutex<Option<u16>> = Mutex::new(None);
 static LAST_GRID: Mutex<Option<[f64; 5]>> = Mutex::new(None);
 /// debug 存图只做一次
 static DEBUG_SAVED: AtomicBool = AtomicBool::new(false);
+/// hCaptcha "Maximum requests" 限流时间戳 (unix ms) — 期间跳过 refresh/checkbox 点击
+static RATE_LIMITED: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+fn rate_limited_until() -> i64 {
+    RATE_LIMITED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn is_rate_limited() -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    now < rate_limited_until()
+}
+
+fn mark_rate_limited(cooldown_ms: i64) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    RATE_LIMITED.store(now + cooldown_ms, std::sync::atomic::Ordering::Relaxed);
+}
 
 pub fn reset_sitekey() {
     *SITEKEY.lock().unwrap() = None;
@@ -556,7 +578,16 @@ async fn watch_getcaptcha(page: &playwright_rs::Page) {
                                 println!("[vision] getcaptcha 解析成功 tasklist={n} prompt={:?}", extract_prompt(&v));
                                 *GETCAPTCHA.lock().unwrap() = Some(v);
                             }
-                            Err(e) => println!("[vision] getcaptcha JSON 解析失败: {e}"),
+                            Err(e) => {
+                                // "Maximum requests" = hCaptcha 限流 — 期间点击/refresh 全部无效, 冷却 60s
+                                let txt = String::from_utf8_lossy(&bytes);
+                                if txt.contains("Maximum requests") {
+                                    println!("[vision] hCaptcha 限流 (Maximum requests), 冷却 60s");
+                                    mark_rate_limited(60_000);
+                                } else {
+                                    println!("[vision] getcaptcha JSON 解析失败: {e}");
+                                }
+                            }
                         }
                     }
                     Err(e) => println!("[vision] getcaptcha body 读取失败: {e}"),
@@ -1818,6 +1849,7 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
     let mut last_fp = String::new();
     let mut same_rounds = 0u32;
     let mut checkbox_ticks = 0u32;
+    let mut fail_rounds = 0u32;
 
     while tokio::time::Instant::now() < deadline {
         // 1. 已有 token 直接返回 (答对后 challenge 关闭, token 落 textarea)
@@ -1836,7 +1868,20 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
             }
         }
 
-        // 2. 无挑战数据 → 点 checkbox 等挑战弹出
+        // 2. 限流冷却期 — 点击/refresh 都无效, 只等 token 或冷却结束
+        if is_rate_limited() {
+            let remain = (rate_limited_until()
+                - std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0))
+                / 1000;
+            println!("[vision] 限流冷却中, 剩余 {remain}s (跳过点击/refresh)");
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            continue;
+        }
+
+        // 3. 无挑战数据 → 点 checkbox 等挑战弹出
         let data = GETCAPTCHA.lock().unwrap().clone();
         let Some(data) = data else {
             checkbox_ticks += 1;
@@ -1951,8 +1996,10 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                 let _ = refresh_challenge(page).await;
                 last_fp.clear();
                 same_rounds = 0;
-                // 单轮失败不放弃 — 刷新后继续尝试 (180s 预算内)
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                // 失败退避: 连续失败越多等越久 (减少 getcaptcha 请求密度, 防限流)
+                fail_rounds += 1;
+                let backoff = std::cmp::min(2u64.saturating_pow(fail_rounds.min(5)), 32);
+                tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
                 continue;
             }
         }
