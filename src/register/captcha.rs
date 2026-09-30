@@ -1151,6 +1151,11 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
         *LAST_PROMPT.lock().unwrap() = Some(prompt.clone());
     }
     // VLM 主路径优先 — 不依赖路由表, 语义推理题型也能解
+    // drag 类 prompt 跳过 VLM (CV 从未成功, 白烧预算) — 直接 refresh 换题
+    if super::drag::route_drag(&prompt).is_some() {
+        println!("[vision] drag 类 prompt: 跳过求解, refresh 换题");
+        return Err("drag skipped, refresh".into());
+    }
     if let Some(vr) = vlm_solve_round(page, data, &prompt).await {
         match vr {
             Ok(()) => return Ok(()),
@@ -1162,9 +1167,6 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
         // 置信度低会走 refresh/多轮, 不至于完全躺平
         println!("[vision] prompt 未知 (加密轮次), 默认 hot_food 语义组");
         prompt = "Select items safe for a hot oven".to_string();
-    }
-    if super::drag::route_drag(&prompt).is_some() {
-        return solve_drag_round(page, &prompt).await;
     }
     let type_key = super::vision::route_type(&prompt)
         .ok_or_else(|| format!("unsupported prompt: {prompt}"))?;
