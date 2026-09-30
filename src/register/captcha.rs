@@ -737,6 +737,47 @@ fn last_vlm_region() -> ((), [f64; 4]) {
     )
 }
 
+/// 题图采集: tasklist 格图按 prompt 题族存档 (data/train/<slug>/img_<md5>.png)。
+/// hCaptcha 题图固定循环 — 攒图后建特征库做格级精确匹配 (人工标注一次, 永久有效)。
+fn collect_training(tiles: &[Vec<u8>], prompt: &str, data: &Value) {
+    let slug: String = prompt
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect::<String>()
+        .to_lowercase()
+        .chars()
+        .take(48)
+        .collect();
+    let dir = std::path::Path::new("data/train").join(&slug);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // prompt 侧元数据 (每族一份)
+    let meta = dir.join("_prompt.json");
+    if !meta.exists() {
+        let _ = std::fs::write(
+            &meta,
+            serde_json::json!({"prompt": prompt, "requester": data["requester"], "first_seen": ts}).to_string(),
+        );
+    }
+    for (i, t) in tiles.iter().enumerate() {
+        // 简易内容指纹 (len + 头尾采样) — 去重用, 避免引入哈希 crate 的名字冲突
+        let mut h: u64 = t.len() as u64;
+        for chunk in [t.first().copied().unwrap_or(0), t[t.len() / 2], *t.last().unwrap_or(&0)] {
+            h = h.wrapping_mul(0x100000001b3).wrapping_add(chunk as u64);
+        }
+        let path = dir.join(format!("{i:02}_{h:016x}.png"));
+        if path.exists() {
+            continue;
+        }
+        let _ = std::fs::write(&path, t);
+    }
+}
+
 /// point 类 prompt: 单场景点物体 (非格子选择, 答案=物体中心坐标)。
 fn is_point_prompt(prompt: &str) -> bool {
     let p = prompt.to_lowercase();
@@ -816,6 +857,7 @@ async fn inner_vlm_solve(
         }
         if tiles.iter().all(|t| t.is_some()) {
             let bytes: Vec<Vec<u8>> = tiles.iter().map(|t| t.clone().unwrap()).collect();
+            collect_training(&bytes, prompt, data);
             if let Some(png) = compose_grid_dynamic(&bytes) {
                 println!("[vlm] 挑战图来源: tasklist {} 张拼图", bytes.len());
                 grid_png = Some(png);
