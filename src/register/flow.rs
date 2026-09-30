@@ -203,7 +203,7 @@ pub async fn register_one(
         // 兜底: 登录入口常为 <a> 链接 (role=button 匹配不到) — href 含 login 的直接跳
         if find_frame_with(&page, "input[name=\"email\"]").await.is_none() {
             let js = r#"(() => { const a = [...document.querySelectorAll('a')].find(x => /login|signin|auth/i.test((x.href||'') + (x.innerText||''))); if (a) { a.click(); return a.href; } return ''; })()"#;
-            if let Ok(href) = page.evaluate::<Value, String>(js, None).await {
+            if let Ok(href) = page.evaluate::<serde_json::Value, String>(js, None).await {
                 if !href.is_empty() {
                     log(&logf, &format!("[3] <a> 登录链接点击: {href}"));
                 }
