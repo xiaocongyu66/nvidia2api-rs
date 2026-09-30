@@ -298,7 +298,11 @@ pub async fn register_one(
             }
             // 挂响应监听再点击
             captcha::watch_register_response(&page).await;
-            let btn = form_frame.locator("#register_button");
+            // form_frame 可能已消亡 (密码后页面跳转) — 重找含注册按钮的 frame
+            let btn_frame = find_frame_with(&page, "#register_button")
+                .await
+                .unwrap_or_else(|| form_frame.clone());
+            let btn = btn_frame.locator("#register_button");
             let mut clicked = false;
             for _ in 0..30 {
                 if btn.count().await.unwrap_or(0) > 0 && btn.is_enabled().await.unwrap_or(false) {
