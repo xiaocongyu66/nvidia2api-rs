@@ -594,7 +594,11 @@ pub fn solve_missing_pieces(px: &[u8], w: usize, h: usize) -> Result<DragSolutio
 /// 按提示词路由拖拽子类型
 pub fn route_drag(prompt: &str) -> Option<&'static str> {
     let p = prompt.to_lowercase();
-    if p.contains("missing piece") || p.contains("complete the image") {
+    if p.contains("missing piece")
+        || p.contains("complete the image")
+        || p.contains("complete the puzzle")
+        || p.contains("framed pieces")
+    {
         return Some("missing_pieces_drag");
     }
     if p.contains("drag") || p.contains("drop") {

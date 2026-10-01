@@ -1332,11 +1332,14 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
     if !prompt.is_empty() {
         *LAST_PROMPT.lock().unwrap() = Some(prompt.clone());
     }
-    // VLM 主路径优先 — 不依赖路由表, 语义推理题型也能解
-    // drag 类 prompt 跳过 VLM (CV 从未成功, 白烧预算) — 直接 refresh 换题
+    // drag 类 prompt — 截图 CV 求解 (Phase2 拼图/配对算法), 失败再 refresh 换题
     if super::drag::route_drag(&prompt).is_some() {
-        println!("[vision] drag 类 prompt: 跳过求解, refresh 换题");
-        return Err("drag skipped, refresh".into());
+        println!("[vision] drag 类 prompt: 走截图 CV 求解");
+        match solve_drag_screenshot(page, &prompt).await {
+            Ok(()) => return Ok(()),
+            Err(e) => println!("[vision] drag CV 失败: {e}, refresh 换题"),
+        }
+        return Err("drag failed, refresh".into());
     }
     // 题库精确匹配优先 — "Select all" 类静态标注题, 全 tile 命中直接用标注答案 (零延迟+确定性)
     if super::feature_lib::static_labelable(&prompt) {
@@ -1597,7 +1600,7 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
 
 /// 加密轮次的 drag 画布求解: challenge iframe 裁剪图直接喂 pair_drag CV。
 /// (加密时 frame 树未 attach 拿不到 canvas 元素, 但 iframe 画面完整可见)
-async fn solve_drag_screenshot(page: &playwright_rs::Page) -> Result<(), String> {
+async fn solve_drag_screenshot(page: &playwright_rs::Page, prompt: &str) -> Result<(), String> {
     let js = r#"(() => {
         const fs = [...document.querySelectorAll('iframe')].filter(f => {
             if (!(f.src||'').includes('hcaptcha')) return false;
@@ -1639,8 +1642,8 @@ async fn solve_drag_screenshot(page: &playwright_rs::Page) -> Result<(), String>
     let cpx = crop.into_raw();
     println!("[vision] drag 截图模式: 画布{}x{}", cw, ch);
 
-    let prompt = "Drag the letter to the place where it fits";
-    let sol = super::drag::solve_pair_drag(&cpx, cw, ch)?;
+    // 按路由分派子算法 (拼图 missing_pieces / 配对 pair_drag)
+    let sol = super::drag::solve(prompt, &cpx, cw, ch)?;
     println!("[vision] drag 截图: from=({:.0},{:.0}) → to=({:.0},{:.0})", sol.from.0, sol.from.1, sol.to.0, sol.to.1);
 
     // debug 标注
@@ -2052,8 +2055,8 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                                 Err(e) => println!("[vision] 加密轮次 VLM 失败: {e}"),
                             }
                         }
-                        // 次路径: drag 画布 CV 求解
-                        match solve_drag_screenshot(page).await {
+                        // 次路径: drag 画布 CV 求解 (加密轮 prompt 未知, 按画面结构走 pair 路由)
+                        match solve_drag_screenshot(page, "Drag the letter to the place where it fits").await {
                             Ok(()) => {
                                 println!("[vision] 加密轮次 drag 截图求解完成");
                                 tokio::time::sleep(std::time::Duration::from_millis(600)).await;
