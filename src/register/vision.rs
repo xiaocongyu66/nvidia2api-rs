@@ -43,7 +43,7 @@ struct Engine {
 
 static ENGINE: OnceLock<Engine> = OnceLock::new();
 
-fn models_dir() -> PathBuf {
+pub fn models_dir() -> PathBuf {
     crate::storage::data_dir().join("models")
 }
 

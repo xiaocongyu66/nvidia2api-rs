@@ -1,6 +1,7 @@
 //! 注册机: NVIDIA BUILD 账号自动注册 + nvapi- key 自动入库 (移植自 zseek/nvidia-register, playwright-rs 原生实现)。
 
 pub mod captcha;
+pub mod ddddocr;
 pub mod drag;
 pub mod email;
 pub mod feature_lib;

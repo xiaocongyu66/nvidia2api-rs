@@ -1300,6 +1300,35 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
             }
         }
     }
+    // OCR 兜底 (prompt 为 canvas 渲染或 DOM 抓取失败): 截 .prompt-text 元素 → ddddocr 本地推理 (毫秒级)
+    if prompt.is_empty() {
+        if let Some(frame) = find_challenge_frame_wait(page, 2_000).await {
+            let loc = frame.locator(".prompt-text, [class*='prompt-text']").first();
+            match loc.screenshot(None).await {
+                Ok(shot) if shot.len() > 200 => {
+                    match super::ddddocr::ensure_ocr() {
+                        Ok(()) => {
+                            let raw = super::ddddocr::recognize(&shot);
+                            let norm = super::ddddocr::normalize_prompt(&raw);
+                            // 模板匹配优先还原原文 (空格+完整句), 失败用 OCR 原文
+                            let final_prompt = super::ddddocr::match_known_prompt(&raw)
+                                .or_else(|| super::ddddocr::match_known_prompt(&norm))
+                                .unwrap_or(norm);
+                            if !final_prompt.is_empty() {
+                                println!("[vision] 加密轮 OCR prompt: {final_prompt:?} (raw={raw:?})");
+                                prompt = final_prompt;
+                            } else {
+                                println!("[vision] 加密轮 OCR 无有效结果 (raw={raw:?})");
+                            }
+                        }
+                        Err(e) => println!("[vision] OCR 引擎初始化失败: {e}"),
+                    }
+                }
+                Ok(_) => println!("[vision] 加密轮 prompt 元素截图过小"),
+                Err(e) => println!("[vision] 加密轮 prompt 元素截图失败: {e}"),
+            }
+        }
+    }
     if !prompt.is_empty() {
         *LAST_PROMPT.lock().unwrap() = Some(prompt.clone());
     }
