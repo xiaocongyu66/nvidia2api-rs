@@ -1284,6 +1284,45 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
         println!("[vision] drag 类 prompt: 跳过求解, refresh 换题");
         return Err("drag skipped, refresh".into());
     }
+    // 题库精确匹配优先 — "Select all" 类静态标注题, 全 tile 命中直接用标注答案 (零延迟+确定性)
+    if super::feature_lib::static_labelable(&prompt) {
+        let urls: Vec<String> = data["tasklist"]
+            .as_array()
+            .map(|l| {
+                l.iter()
+                    .filter_map(|t| t["datapoint_uri"].as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !urls.is_empty() && urls.len() <= 9 {
+            let client = http();
+            let ua = page
+                .evaluate::<Value, String>("navigator.userAgent", None)
+                .await
+                .unwrap_or_else(|_| "Mozilla/5.0".into());
+            let mut tiles = Vec::new();
+            let mut all = true;
+            for u in &urls {
+                match download_tile(&client, u, &ua).await {
+                    Some(b) => tiles.push(b),
+                    None => {
+                        all = false;
+                        break;
+                    }
+                }
+            }
+            if all {
+                if let Some(lib_idx) = super::feature_lib::lookup(&tiles, &prompt) {
+                    if let Err(e) = click_tiles_and_submit(page, &lib_idx).await {
+                        println!("[lib] 题库答案点击失败: {e}, 落回 VLM");
+                    } else {
+                        println!("[lib] 题库精确匹配完成 (跳过 VLM)");
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
     if let Some(vr) = vlm_solve_round(page, data, &prompt).await {
         match vr {
             Ok(()) => return Ok(()),

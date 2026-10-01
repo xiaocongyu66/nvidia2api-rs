@@ -3,6 +3,7 @@
 pub mod captcha;
 pub mod drag;
 pub mod email;
+pub mod feature_lib;
 pub mod flow;
 pub mod vision;
 pub mod vlm;
