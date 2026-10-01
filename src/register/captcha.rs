@@ -1275,6 +1275,31 @@ async fn capture_challenge_full(
 
 async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Result<(), String> {
     let mut prompt = extract_prompt(data);
+    // 加密轮: getcaptcha JSON 层加密, 但 challenge iframe 顶部渲染给用户的 prompt 文字是明文
+    // → playwright frame.evaluate 直接抓 DOM (零成本); canvas 渲染时后续再走 OCR 兜底
+    if prompt.is_empty() {
+        let js_prompt = r#"(() => {
+            const sels = ['.prompt-text', '.challenge-view .prompt-text', '[class*="prompt-text"]'];
+            for (const s of sels) {
+                for (const el of document.querySelectorAll(s)) {
+                    const t = (el.textContent || '').trim();
+                    if (t.length > 5) return t;
+                }
+            }
+            return '';
+        })()"#;
+        if let Some(frame) = find_challenge_frame_wait(page, 2_000).await {
+            if let Ok(v) = frame.evaluate::<Value>(js_prompt, None).await {
+                if let Some(t) = v.as_str() {
+                    if !t.is_empty() && t.len() > 5 {
+                        println!("[vision] 加密轮 DOM prompt 抓取成功: {t:?}");
+                        prompt = t.to_string();
+                        *LAST_PROMPT.lock().unwrap() = Some(prompt.clone());
+                    }
+                }
+            }
+        }
+    }
     if !prompt.is_empty() {
         *LAST_PROMPT.lock().unwrap() = Some(prompt.clone());
     }
