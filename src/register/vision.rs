@@ -334,6 +334,47 @@ pub fn route_type(prompt: &str) -> Option<&'static str> {
     if (p.contains("dissolve") || p.contains("melt")) && p.contains("water") {
         return Some("dissolve_melt");
     }
+    // 10. 中文界面 prompt → 已知题型映射 (hCaptcha 多语言, CLIP 标签语义按英文 spec 走)
+    if p.contains("用腿") || p.contains("腿移动") || p.contains("腿走") {
+        return Some("legs_movement");
+    }
+    if p.contains("重") && (p.contains("轻") || p.contains("称") || p.contains("weighs")) {
+        return Some("weighs_less");
+    }
+    if p.contains("浴缸") || p.contains("洗澡") {
+        return Some("bathtub_toys");
+    }
+    if p.contains("舀") || p.contains("勺") || p.contains("铲") {
+        return Some("scoop_tools");
+    }
+    if p.contains("镜子") || p.contains("镜像") {
+        return Some("mirror_wrong");
+    }
+    if p.contains("车") && (p.contains("移动") || p.contains("开走")) {
+        return Some("vehicle_move");
+    }
+    // 11. 英文已采集题族补全 (7 实战题族)
+    if p.contains("legs") && (p.contains("movement") || p.contains("move")) {
+        return Some("legs_movement");
+    }
+    if p.contains("weighs less") {
+        return Some("weighs_less");
+    }
+    if p.contains("bathtub") {
+        return Some("bathtub_toys");
+    }
+    if p.contains("scoop") {
+        return Some("scoop_tools");
+    }
+    if p.contains("mirror") {
+        return Some("mirror_wrong");
+    }
+    if p.contains("vehicle") && p.contains("move") {
+        return Some("vehicle_move");
+    }
+    if p.contains("oven") || p.contains("烤炉") || p.contains("烤箱") {
+        return Some("hot_food");
+    }
     None
 }
 
