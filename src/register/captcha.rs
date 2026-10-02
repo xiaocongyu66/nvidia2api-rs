@@ -890,12 +890,11 @@ async fn challenge_iframe_rect(page: &playwright_rs::Page) -> Option<[f64; 4]> {
 /// VLM 主路径 (gpt-pp-team 第 1 层): 整幅挑战图直出答案。
 /// 返回 None = VLM 未配置 (调用方落回 CLIP 启发式)。
 async fn vlm_solve_round(
-    page: &playwright_rs::Page,
-    data: &Value,
-    prompt: &str,
+    _page: &playwright_rs::Page,
+    _data: &Value,
+    _prompt: &str,
 ) -> Option<Result<(), String>> {
-    let cfg = super::vlm::config()?;
-    Some(inner_vlm_solve(page, data, prompt, &cfg).await)
+    None
 }
 
 async fn inner_vlm_solve(
@@ -1378,12 +1377,6 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
                     }
                 }
             }
-        }
-    }
-    if let Some(vr) = vlm_solve_round(page, data, &prompt).await {
-        match vr {
-            Ok(()) => return Ok(()),
-            Err(e) => println!("[vision] VLM 求解失败, 落回 CLIP: {e}"),
         }
     }
     if prompt.is_empty() {
@@ -2043,19 +2036,17 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                         .map(|v| v.as_bool().unwrap_or(false))
                         .unwrap_or(false);
                     if challenge_visible {
-                        println!("[vision] 加密轮次检测到挑战画面, 截图模式求解");
-                        // VLM 优先: prompt 为空, VLM 自行看图理解题型
-                        if let Some(vr) = vlm_solve_round(page, &serde_json::json!({"tasklist": []}), "").await {
-                            match vr {
-                                Ok(()) => {
-                                    println!("[vision] 加密轮次 VLM 求解完成");
-                                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-                                    continue;
-                                }
-                                Err(e) => println!("[vision] 加密轮次 VLM 失败: {e}"),
+                        println!("[vision] 加密轮次检测到挑战画面, 本地链路求解");
+                        // 1) ddddocr OCR prompt (DOM 已在 solve_challenge_round 内先抓) → 拿到 prompt 走标准链路
+                        match solve_challenge_round(page, &serde_json::json!({"tasklist": []})).await {
+                            Ok(()) => {
+                                println!("[vision] 加密轮次本地求解完成");
+                                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                                continue;
                             }
+                            Err(e) => println!("[vision] 加密轮次标准链路失败: {e}, drag CV 兜底"),
                         }
-                        // 次路径: drag 画布 CV 求解 (加密轮 prompt 未知, 按画面结构走 pair 路由)
+                        // 2) drag 画布 CV 求解 (prompt 未知, 按画面结构走 pair 路由)
                         match solve_drag_screenshot(page, "Drag the letter to the place where it fits").await {
                             Ok(()) => {
                                 println!("[vision] 加密轮次 drag 截图求解完成");

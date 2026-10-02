@@ -8,3 +8,4 @@ data/
 *.sqlite3*
 /register/
 models/ort/*.tar.lzma2
+nvidia2api-rs
