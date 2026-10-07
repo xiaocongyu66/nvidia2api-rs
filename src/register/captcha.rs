@@ -35,6 +35,8 @@ static LAST_GRID: Mutex<Option<[f64; 5]>> = Mutex::new(None);
 static DEBUG_SAVED: AtomicBool = AtomicBool::new(false);
 /// hCaptcha "Maximum requests" 限流时间戳 (unix ms) — 期间跳过 refresh/checkbox 点击
 static RATE_LIMITED: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+/// checkcaptcha 判定嗅探 — Some(true)=答对, Some(false)=答错; take() 读走即清, 提交前手动清防残留误判
+static LAST_VERDICT: Mutex<Option<bool>> = Mutex::new(None);
 
 fn rate_limited_until() -> i64 {
     RATE_LIMITED.load(std::sync::atomic::Ordering::Relaxed)
@@ -54,6 +56,35 @@ fn mark_rate_limited(cooldown_ms: i64) {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
     RATE_LIMITED.store(now + cooldown_ms, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn take_verdict() -> Option<bool> {
+    LAST_VERDICT.lock().unwrap().take()
+}
+
+fn clear_verdict() {
+    *LAST_VERDICT.lock().unwrap() = None;
+}
+
+/// 响应体 gzip 透明解压 (魔数 1f 8b) — getcaptcha/checkcaptcha 嗅探共用
+fn maybe_gunzip(raw: Vec<u8>) -> Vec<u8> {
+    if raw.starts_with(&[0x1f, 0x8b]) {
+        use std::io::Read;
+        let mut d = flate2::read::GzDecoder::new(&raw[..]);
+        let mut out = Vec::new();
+        match d.read_to_end(&mut out) {
+            Ok(_) => {
+                println!("[vision] gzip 解压成功 {}→{}B", raw.len(), out.len());
+                out
+            }
+            Err(e) => {
+                println!("[vision] gzip 解压失败: {e}");
+                raw
+            }
+        }
+    } else {
+        raw
+    }
 }
 
 pub fn reset_sitekey() {
@@ -548,30 +579,39 @@ async fn watch_getcaptcha(page: &playwright_rs::Page) {
     *GETCAPTCHA.lock().unwrap() = None;
     let _ = page
         .on_response(|resp| async move {
-            if resp.url().contains("getcaptcha") {
+            if resp.url().contains("checkcaptcha") {
+                // Phase3-D: 判定嗅探 — 答对/答错立即感知, 求解器不空等
+                match resp.body().await {
+                    Ok(raw) => {
+                        let bytes = maybe_gunzip(raw);
+                        match serde_json::from_slice::<Value>(&bytes) {
+                            Ok(v) => match v["pass"].as_bool() {
+                                Some(true) => {
+                                    let t = v["generated_pass_UUID"].as_str().unwrap_or("");
+                                    println!("[vision] checkcaptcha: 答对 ✓ (token={}…)", &t[..t.len().min(6)]);
+                                    *LAST_VERDICT.lock().unwrap() = Some(true);
+                                }
+                                Some(false) => {
+                                    println!("[vision] checkcaptcha: 答错 ✗ — 新题将自动弹出");
+                                    *LAST_VERDICT.lock().unwrap() = Some(false);
+                                }
+                                None => println!(
+                                    "[vision] checkcaptcha 无 pass 字段: keys={:?}",
+                                    v.as_object().map(|o| o.keys().collect::<Vec<_>>())
+                                ),
+                            },
+                            Err(e) => println!("[vision] checkcaptcha JSON 解析失败: {e}"),
+                        }
+                    }
+                    Err(e) => println!("[vision] checkcaptcha body 读取失败: {e}"),
+                }
+            } else if resp.url().contains("getcaptcha") {
                 println!("[vision] getcaptcha 响应捕获 status={}", resp.status());
                 match resp.body().await {
                     Ok(raw) => {
                         let head: String = raw.iter().take(16).map(|b| format!("{b:02x}")).collect();
                         println!("[vision] getcaptcha body len={} head={head}", raw.len());
-                        // 服务端有时返回 gzip 体 — 魔数 1f 8b
-                        let bytes: Vec<u8> = if raw.starts_with(&[0x1f, 0x8b]) {
-                            use std::io::Read;
-                            let mut d = flate2::read::GzDecoder::new(&raw[..]);
-                            let mut out = Vec::new();
-                            match d.read_to_end(&mut out) {
-                                Ok(_) => {
-                                    println!("[vision] gzip 解压成功 {}→{}B", raw.len(), out.len());
-                                    out
-                                }
-                                Err(e) => {
-                                    println!("[vision] gzip 解压失败: {e}");
-                                    raw
-                                }
-                            }
-                        } else {
-                            raw
-                        };
+                        let bytes: Vec<u8> = maybe_gunzip(raw);
                         match serde_json::from_slice::<Value>(&bytes) {
                             Ok(v) => {
                                 let n = v["tasklist"].as_array().map(|a| a.len()).unwrap_or(0);
@@ -2085,6 +2125,7 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
         last_fp = fp;
         same_rounds = 0;
 
+        clear_verdict();
         match solve_challenge_round(page, &data).await {
             Ok(()) => println!("[vision] 本轮点击+提交完成, 等待结果"),
             Err(e) => {
@@ -2099,6 +2140,24 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                 let backoff = std::cmp::min(2u64.saturating_pow(fail_rounds.min(5)), 32);
                 tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
                 continue;
+            }
+        }
+        // checkcaptcha 判定轮询 (3s): 答错立即感知 (新题由 hCaptcha 自动弹出, 嗅探器落槽后
+        // fingerprint 变化自然重解); 答对等 token; 无判定 (被限流掐掉) 不阻塞原有时序
+        for _ in 0..6 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            match take_verdict() {
+                Some(false) => {
+                    println!("[vision] 判定: 答错 — 清指纹等新题");
+                    last_fp.clear();
+                    same_rounds = 0;
+                    break;
+                }
+                Some(true) => {
+                    println!("[vision] 判定: 答对 — pass token 马上落 textarea");
+                    break;
+                }
+                None => {}
             }
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
