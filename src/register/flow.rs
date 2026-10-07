@@ -3,6 +3,7 @@
 use super::captcha::{self, SolverConfig};
 use super::email::{CloudflareTempEmail, DuckMail, Inbox, MoeMail};
 use playwright_rs::{AriaRole, GetByRoleOptions, Playwright};
+use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -69,6 +70,36 @@ async fn click_by_names(
         }
     }
     None
+}
+
+/// consent 页推进: 遍历主 frame + 所有 iframe — 先勾协议 checkbox, 再按中英文案点按钮;
+/// 全不中时打印各 frame 可见按钮文本 (诊断, 下次失败有确切线索)
+async fn consent_advance(page: &playwright_rs::Page, logf: &LogFn) {
+    let js = r#"(() => {
+        document.querySelectorAll('input[type="checkbox"]:not(:checked)').forEach(c => c.click());
+        const want = ['继续','同意并继续','同意','接受','提交','Continue','Accept','Agree','Submit','Join','开始','Start'];
+        const els = [...document.querySelectorAll('button, input[type="submit"], a[role="button"], a.btn')];
+        for (const w of want) {
+            const hit = els.find(e => !e.disabled && ((e.textContent||'').trim().includes(w) || (e.value||'').includes(w)));
+            if (hit) { hit.click(); return 'clicked:' + ((hit.textContent||hit.value||w)+'').trim().slice(0,30); }
+        }
+        const texts = els.map(e => ((e.textContent||e.value||'')+'').trim()).filter(t => t).slice(0,8);
+        return 'buttons:' + JSON.stringify(texts);
+    })()"#;
+    if let Ok(frames) = page.frames().await {
+        for f in frames {
+            if let Ok(v) = f.evaluate::<Value>(js, None).await {
+                let s = v.as_str().unwrap_or("").to_string();
+                if s.is_empty() || s == "buttons:[]" {
+                    continue;
+                }
+                logf(format!("  consent: {s}"));
+                if s.starts_with("clicked:") {
+                    return;
+                }
+            }
+        }
+    }
 }
 
 /// 单账号完整注册流程。成功返回 nvapi- key。
@@ -476,7 +507,7 @@ pub async fn register_one(
                 continue;
             }
             if url_now.contains("consent") || url_now.contains("static-login.nvidia.com") {
-                let _ = click_by_names(&page, &["继续", "提交", "Continue", "Submit"], 5000).await;
+                consent_advance(&page, &logf).await;
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 continue;
             }
