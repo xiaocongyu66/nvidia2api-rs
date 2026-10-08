@@ -766,16 +766,26 @@ pub fn solve_letter_fill(px: &[u8], w: usize, h: usize) -> Result<DragSolution, 
     let density = |c: &Comp| -> f32 {
         c.area as f32 / (c.w.max(1) as f32 * c.h.max(1) as f32)
     };
-    // 落点槽判别: 实心小块, 密度最高 (横条 ~1.0, 倾斜短粗段 ~0.8; 衬线字母 <0.6)。
-    // 云团反光被 max边≤60 尺寸上限排除
+    // 落点槽判别: 白色实心, 两种实测形态 —
+    //   填充短块 blob: 倾斜短粗段 ~28×30 (字母密度 0.44~0.55 被 0.7 排除; 云团反光被 max边≤90 排除)
+    //   细长线条 line: 水平细横条 ~150×7 (实测 drag_fail.png; 字母宽高比 <4 不满足, 按钮长条 w>220/h>16 排除)
     let pick_slot = |cs: &[Comp]| -> Option<(f32, f32, i32, i32)> {
         cs.iter()
             .filter(|c| {
-                density(c) >= 0.5
+                let d = density(c);
+                let blob = d >= 0.7
                     && c.area >= 100
                     && c.area <= 2500
                     && c.w.min(c.h) >= 5
-                    && c.w.max(c.h) <= 60
+                    && c.w.max(c.h) <= 90;
+                let line = d >= 0.55
+                    && c.area >= 80
+                    && c.h >= 3
+                    && c.h <= 16
+                    && c.w >= 40
+                    && c.w <= 220
+                    && (c.w as f32 / c.h.max(1) as f32) >= 4.0;
+                blob || line
             })
             .max_by(|a, b| density(a).partial_cmp(&density(b)).unwrap_or(std::cmp::Ordering::Equal))
             .map(|c| (c.cx, c.cy, c.x, c.y))
@@ -988,6 +998,64 @@ mod tests {
         );
         assert!(
             (sol.to.0 - 450.0).abs() < 8.0 && (sol.to.1 - 105.0).abs() < 8.0,
+            "to={:?}",
+            sol.to
+        );
+    }
+
+    #[test]
+    fn letter_fill_thin_line_slot() {
+        // 复现实测截图形态: 黑体字母 E (密度 ~0.5) + 细长水平槽 150x7
+        let (w, h) = (300usize, 280usize);
+        let mut px = vec![0u8; w * h * 3];
+        for p in px.chunks_mut(3) {
+            p.copy_from_slice(&[20, 45, 90]);
+        }
+        let mut put = |x: usize, y: usize| {
+            let i = (y * w + x) * 3;
+            px[i] = 230;
+            px[i + 1] = 230;
+            px[i + 2] = 230;
+        };
+        // 顶部 prompt 文字带 (y<0.16h 排除)
+        for y in 8..20 {
+            for x in 50..250 {
+                put(x, y);
+            }
+        }
+        // 黑体 "E": 竖笔 8x60 + 三横笔 27x8 → 密度 ~0.5, 质心 ~(144,130)
+        for y in 100..160 {
+            for x in 130..138 {
+                put(x, y);
+            }
+        }
+        for y0 in [100usize, 126, 152] {
+            for y in y0..y0 + 8 {
+                for x in 138..165 {
+                    put(x, y);
+                }
+            }
+        }
+        // 细长落点横条 150x7, 中心 (135, 183)
+        for y in 180..187 {
+            for x in 60..210 {
+                put(x, y);
+            }
+        }
+        // 底部伪 "I'm not a robot" 白条 240x14 (部分入 y 带, 靠 line 的 w≤220 与 blob 的 max边≤90 排除)
+        for y in 235..249 {
+            for x in 30..270 {
+                put(x, y);
+            }
+        }
+        let sol = solve("Drag the letter to the place where it fits", &px, w, h).unwrap();
+        assert!(
+            (sol.from.0 - 144.0).abs() < 8.0 && (sol.from.1 - 130.0).abs() < 8.0,
+            "from={:?}",
+            sol.from
+        );
+        assert!(
+            (sol.to.0 - 135.0).abs() < 8.0 && (sol.to.1 - 183.0).abs() < 8.0,
             "to={:?}",
             sol.to
         );
