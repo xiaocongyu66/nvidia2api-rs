@@ -2144,6 +2144,12 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                     }
                 }
             }
+            // 加密 getcaptcha 体解析失败会让挑战永远弹不出 (checkbox 在但点了没反应)
+            // → 定期 reload widget, 重新走一次明文 getcaptcha
+            if checkbox_ticks % 20 == 8 {
+                println!("[vision] checkbox 长期无响应, 重载 widget 重取 getcaptcha");
+                reset_widget(page).await;
+            }
             try_click_hcaptcha_checkbox(page).await;
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             continue;

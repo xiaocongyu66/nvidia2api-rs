@@ -601,6 +601,9 @@ pub fn route_drag(prompt: &str) -> Option<&'static str> {
     {
         return Some("missing_pieces_drag");
     }
+    if p.contains("letter") {
+        return Some("letter_fill");
+    }
     if p.contains("drag") || p.contains("drop") {
         return Some("pair_drag");
     }
@@ -611,6 +614,7 @@ pub fn route_drag(prompt: &str) -> Option<&'static str> {
 pub fn solve(prompt: &str, px: &[u8], w: usize, h: usize) -> Result<DragSolution, String> {
     match route_drag(prompt) {
         Some("missing_pieces_drag") => solve_missing_pieces(px, w, h),
+        Some("letter_fill") => solve_letter_fill(px, w, h),
         _ => solve_pair_drag(px, w, h),
     }
 }
@@ -728,4 +732,129 @@ pub fn detect_grid_3x3(px: &[u8], w: usize, h: usize) -> Option<(f64, f64, f64)>
     let tile_h = (cx(row_runs[2]) - cx(row_runs[0])) / 2.0 * 1.04;
     let tile = (tile_w + tile_h) / 2.0;
     Some((cx(col_runs[0]), cx(row_runs[0]), tile))
+}
+
+// ---------------------------------------------------------------------------
+// letter_fill 题型 — "Drag the letters below to fill in the blank":
+// 深蓝背景上白色字母 + 白色短横空白。与 pair_drag 布局完全不同
+// (字母不在左列、空白在右), 用亮度分割找两类组件。
+// ---------------------------------------------------------------------------
+
+pub fn solve_letter_fill(px: &[u8], w: usize, h: usize) -> Result<DragSolution, String> {
+    // 排除顶部 prompt 文字与底部按钮条 (均在画布上下边缘带)
+    let y_lo = (h as f32 * 0.16) as usize;
+    let y_hi = (h as f32 * 0.88) as usize;
+
+    let mut bright = vec![false; w * h];
+    for y in y_lo..y_hi {
+        for x in 0..w {
+            let i = (y * w + x) * 3;
+            let (r, g, b) = (px[i] as u32, px[i + 1] as u32, px[i + 2] as u32);
+            let v = r.max(g).max(b);
+            let mn = r.min(g).min(b);
+            if v > 180 && v - mn < 50 {
+                bright[y * w + x] = true;
+            }
+        }
+    }
+    let bright = morph_open(&bright, w, h, 3);
+    let comps = connected_components(&bright, w, h, 60);
+    if comps.is_empty() {
+        return Err("letter_fill: 未检出亮色对象".into());
+    }
+
+    // 空白横线: 宽扁条 (高 ≤18, 宽高比 ≥2.8)
+    let bar = comps
+        .iter()
+        .filter(|c| c.h <= 18 && c.w >= 25 && c.w as f32 / c.h.max(1) as f32 >= 2.8)
+        .max_by_key(|c| c.w);
+    // 字母: 近方块组件 (高 14..70), 排除横线自身 (h14-18 的粗横线会双重命中)
+    let bar_xy = bar.map(|b| (b.x, b.y));
+    let letter = comps
+        .iter()
+        .filter(|c| {
+            Some((c.x, c.y)) != bar_xy
+                && c.h >= 14
+                && c.h <= 70
+                && c.w as f32 / c.h.max(1) as f32 > 0.3
+                && c.w as f32 / c.h.max(1) as f32 < 3.0
+        })
+        .max_by_key(|c| c.area);
+
+    let bar = bar.ok_or_else(|| format!("letter_fill: 未识别空白横线 (comps={})", comps.len()))?;
+    let letter =
+        letter.ok_or_else(|| format!("letter_fill: 未识别字母 (comps={})", comps.len()))?;
+
+    Ok(DragSolution {
+        from: (letter.cx as f64, letter.cy as f64),
+        to: (bar.cx as f64, bar.cy as f64),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn letter_fill_synthetic() {
+        let (w, h) = (520usize, 409usize);
+        let mut px = vec![0u8; w * h * 3];
+        // 深蓝背景
+        for p in px.chunks_mut(3) {
+            p.copy_from_slice(&[20, 45, 90]);
+        }
+        let mut put = |x: usize, y: usize| {
+            let i = (y * w + x) * 3;
+            px[i] = 245;
+            px[i + 1] = 245;
+            px[i + 2] = 248;
+        };
+        // 顶部伪 prompt 文字带 (应被 y_lo 排除; 若误入会被当成更宽的横线)
+        for y in 8..20 {
+            for x in 50..470 {
+                put(x, y);
+            }
+        }
+        // 白色字母 "A" 轮廓 28x28, 中心 (299, 134)
+        for y in 120..148 {
+            for x in 285..313 {
+                if y < 123 || y > 145 || x < 288 || x > 310 {
+                    put(x, y);
+                }
+            }
+        }
+        // 白色横线 36x12, 中心 (468, 118)
+        for y in 112..124 {
+            for x in 450..486 {
+                put(x, y);
+            }
+        }
+        // 底部伪按钮 (应被 y_hi 排除)
+        for y in 396..406 {
+            for x in 380..500 {
+                put(x, y);
+            }
+        }
+
+        let sol = solve("Drag the letters below to fill in the blank", &px, w, h).unwrap();
+        assert!(
+            (sol.from.0 - 299.0).abs() < 6.0 && (sol.from.1 - 134.0).abs() < 6.0,
+            "from={:?}",
+            sol.from
+        );
+        assert!(
+            (sol.to.0 - 468.0).abs() < 6.0 && (sol.to.1 - 118.0).abs() < 6.0,
+            "to={:?}",
+            sol.to
+        );
+    }
+
+    #[test]
+    fn route_letter_before_drag() {
+        assert_eq!(
+            route_drag("Drag the letter to the place where it fits"),
+            Some("letter_fill")
+        );
+        assert_eq!(route_drag("Drag the matching shape into the hole"), Some("pair_drag"));
+    }
 }
