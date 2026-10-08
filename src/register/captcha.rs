@@ -381,14 +381,30 @@ async fn inject_token(page: &playwright_rs::Page, token: &str) -> bool {
         }})()"#,
         token = serde_json::to_string(token).unwrap_or_default()
     );
-    let _ = page.evaluate::<Value, String>(&js, None).await;
+    // 现场诊断: callback 是否调用 / textarea 注入数 — 全 0 说明注入目标缺失 (页面改版/iframe 结构变化)
+    match page.evaluate::<Value, String>(&js, None).await {
+        Ok(r) => println!("[vision] inject_token: callback|textarea = {r:?}"),
+        Err(e) => println!("[vision] inject_token evaluate 失败: {e}"),
+    }
     // 等 #register_button enable (最多 20s)
     let btn = page.locator("#register_button");
     for _ in 0..20 {
         if btn.count().await.unwrap_or(0) > 0 && btn.is_enabled().await.unwrap_or(false) {
+            println!("[vision] inject_token: register_button 已 enable (第 {}s)", 1 + _);
             return true;
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    // 20s 未 enable — DOM 现场快照 (按钮在不在/disabled 属性/hcaptcha 隐藏字段)
+    let js_probe = r#"(() => JSON.stringify({
+        btn: !!document.querySelector('#register_button'),
+        btnDisabled: document.querySelector('#register_button')?.disabled,
+        hcResp: (document.querySelector('textarea[name=\"h-captcha-response\"]')||{}).value?.length || 0,
+        iframes: [...document.querySelectorAll('iframe')].map(f => (f.src||'').slice(0,50)),
+    }))()"#;
+    match page.evaluate::<Value, Value>(js_probe, None).await {
+        Ok(v) => println!("[vision] inject_token: 按钮 20s 未 enable, 现场={v}"),
+        Err(e) => println!("[vision] inject_token: 现场探针失败: {e}"),
     }
     false
 }
