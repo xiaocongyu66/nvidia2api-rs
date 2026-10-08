@@ -369,7 +369,7 @@ pub fn route_type(prompt: &str) -> Option<&'static str> {
     if p.contains("mirror") || p.contains("reflection") {
         return Some("mirror_wrong");
     }
-    // 12. 新实战题族 (v0.6.1): 可摘环 / 动物背对
+    // 12. 新实战题族 (v0.6.1): 可摘环 / 动物背对 / 柔软材质 / 会融化
     if p.contains("rings") && (p.contains("lifted off") || p.contains("take off")) {
         return Some("rings_liftable");
     }
@@ -378,6 +378,12 @@ pub fn route_type(prompt: &str) -> Option<&'static str> {
         || (p.contains("animals") && p.contains("away from you"))
     {
         return Some("animals_not_looking");
+    }
+    if p.contains("soft") && p.contains("bend") {
+        return Some("soft_bendable");
+    }
+    if p.contains("melt") && p.contains("left out") {
+        return Some("melts_out");
     }
     if p.contains("vehicle") && p.contains("move") {
         return Some("vehicle_move");
