@@ -350,6 +350,10 @@ pub async fn register_one(
             }
             if let Err(e) = captcha::solve_and_inject(&page, &cfg.solver).await {
                 log(&logf, &format!("[6] captcha: {e}"));
+                // hCaptcha IP 限流: 继续重试只会刷新限流窗口, 直接放弃本轮
+                if e.contains("限流") {
+                    return Err("hcaptcha IP 限流, 本轮放弃".into());
+                }
                 // 不 continue — create-account 的 hCaptcha 常为静默模式 (无挑战弹出,
                 // 表单提交时自动验证): 直接点注册按钮让页面自己拿 token
                 log(&logf, "[6] captcha 未过, 尝试静默模式直接提交…");

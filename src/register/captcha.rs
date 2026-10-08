@@ -645,7 +645,12 @@ async fn watch_getcaptcha(page: &playwright_rs::Page) {
                     Err(e) => println!("[vision] checkcaptcha body 读取失败: {e}"),
                 }
             } else if resp.url().contains("getcaptcha") {
-                println!("[vision] getcaptcha 响应捕获 status={}", resp.status());
+                let st = resp.status();
+                println!("[vision] getcaptcha 响应捕获 status={st}");
+                // HTTP 429 硬限流: 冷却 180s, 期间 solve_onnx 快速放弃不再空烧
+                if st == 429 {
+                    mark_rate_limited(180_000);
+                }
                 match resp.body().await {
                     Ok(raw) => {
                         let head: String = raw.iter().take(16).map(|b| format!("{b:02x}")).collect();
@@ -2099,6 +2104,10 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                     .unwrap_or(0))
                 / 1000;
             println!("[vision] 限流冷却中, 剩余 {remain}s (跳过点击/refresh)");
+            // 限流 + 从未拿到挑战 = 本轮不可能过, 快速放弃省掉整段超时
+            if GETCAPTCHA.lock().unwrap().is_none() {
+                return Err(format!("hcaptcha 限流冷却 (剩余{remain}s), 快速放弃"));
+            }
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             continue;
         }
