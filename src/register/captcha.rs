@@ -37,6 +37,28 @@ static DEBUG_SAVED: AtomicBool = AtomicBool::new(false);
 static RATE_LIMITED: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 /// checkcaptcha 判定嗅探 — Some(true)=答对, Some(false)=答错; take() 读走即清, 提交前手动清防残留误判
 static LAST_VERDICT: Mutex<Option<bool>> = Mutex::new(None);
+/// drag 同题防刷 — (画布w,h,from,to) 与上次完全一致 = 答错后同题重弹, 再提交只会死循环
+static LAST_DRAG: Mutex<Option<((usize, usize, i64, i64, i64, i64), u32)>> = Mutex::new(None);
+
+fn drag_repeat_check(w: usize, h: usize, fx: f64, fy: f64, tx: f64, ty: f64) -> Result<(), String> {
+    let key = (w, h, fx as i64, fy as i64, tx as i64, ty as i64);
+    let mut slot = LAST_DRAG.lock().unwrap();
+    match &mut *slot {
+        Some((k, cnt)) if *k == key => {
+            *cnt += 1;
+            let c = *cnt;
+            if c >= 2 {
+                *slot = None;
+                return Err(format!("drag 同答案第 {} 次出现 (题未变=答错), refresh 换题", c + 1));
+            }
+            println!("[vision] drag 防刷: 同答案第 2 次求解 (可能重弹), 本轮仍提交");
+        }
+        _ => {
+            *slot = Some((key, 1));
+        }
+    }
+    Ok(())
+}
 
 fn rate_limited_until() -> i64 {
     RATE_LIMITED.load(std::sync::atomic::Ordering::Relaxed)
@@ -1694,6 +1716,7 @@ async fn solve_drag_screenshot(page: &playwright_rs::Page, prompt: &str) -> Resu
     // 按路由分派子算法 (拼图 missing_pieces / 配对 pair_drag)
     let sol = super::drag::solve(prompt, &cpx, cw, ch)?;
     println!("[vision] drag 截图: from=({:.0},{:.0}) → to=({:.0},{:.0})", sol.from.0, sol.from.1, sol.to.0, sol.to.1);
+    drag_repeat_check(cw, ch, sol.from.0, sol.from.1, sol.to.0, sol.to.1)?;
 
     // debug 标注
     if !DEBUG_SAVED.swap(true, Ordering::Relaxed) {
@@ -1755,6 +1778,7 @@ async fn solve_drag_round(page: &playwright_rs::Page, prompt: &str) -> Result<()
     let (px, pw, ph) = super::drag::decode_png(&shot)?;
     println!("[vision] drag 画布: 截图{pw}x{ph} rect=({:.0},{:.0},{:.0}x{:.0})", rect.x, rect.y, rect.width, rect.height);
     let sol = super::drag::solve(prompt, &px, pw, ph)?;
+    drag_repeat_check(pw, ph, sol.from.0, sol.from.1, sol.to.0, sol.to.1)?;
 
     // debug: 每进程存一次 canvas 原图 + from/to 十字标注
     if !DEBUG_SAVED.swap(true, Ordering::Relaxed) {
