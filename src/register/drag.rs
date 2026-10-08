@@ -736,8 +736,9 @@ pub fn detect_grid_3x3(px: &[u8], w: usize, h: usize) -> Option<(f64, f64, f64)>
 
 // ---------------------------------------------------------------------------
 // letter_fill 题型 — "Drag the letters below to fill in the blank":
-// 深蓝背景上白色字母 + 白色短横空白。与 pair_drag 布局完全不同
-// (字母不在左列、空白在右), 用亮度分割找两类组件。
+// 深蓝背景上白色字母 + 白色落点槽。实测两种形态: 水平横白条 / 斜线端头的
+// 倾斜短粗条 (drag_fail.png 实锤) — 形态学形状不可靠, 但落点槽是实心块,
+// 填充密度 (area/bbox) 显著高于带衬线字母 → 用密度锚定目标。
 // ---------------------------------------------------------------------------
 
 pub fn solve_letter_fill(px: &[u8], w: usize, h: usize) -> Result<DragSolution, String> {
@@ -762,32 +763,35 @@ pub fn solve_letter_fill(px: &[u8], w: usize, h: usize) -> Result<DragSolution, 
     if comps.is_empty() {
         return Err("letter_fill: 未检出亮色对象".into());
     }
+    let density = |c: &Comp| -> f32 {
+        c.area as f32 / (c.w.max(1) as f32 * c.h.max(1) as f32)
+    };
 
-    // 空白横线: 宽扁条 (高 ≤18, 宽高比 ≥2.8)
-    let bar = comps
-        .iter()
-        .filter(|c| c.h <= 18 && c.w >= 25 && c.w as f32 / c.h.max(1) as f32 >= 2.8)
-        .max_by_key(|c| c.w);
-    // 字母: 近方块组件 (高 14..70), 排除横线自身 (h14-18 的粗横线会双重命中)
-    let bar_xy = bar.map(|b| (b.x, b.y));
-    let letter = comps
+    // 落点槽: 实心小块, 密度最高 (横条 ~1.0, 倾斜短粗段 ~0.8; 衬线字母 <0.6)
+    let target = comps
         .iter()
         .filter(|c| {
-            Some((c.x, c.y)) != bar_xy
-                && c.h >= 14
-                && c.h <= 70
-                && (c.w as f32 / c.h.max(1) as f32) > 0.3
-                && (c.w as f32 / c.h.max(1) as f32) < 3.0
+            density(c) >= 0.55
+                && c.area >= 120
+                && c.area <= 2500
+                && c.w.min(c.h) >= 6
+                && c.w.max(c.h) <= 60
         })
-        .max_by_key(|c| c.area);
+        .max_by(|a, b| density(a).partial_cmp(&density(b)).unwrap_or(std::cmp::Ordering::Equal));
+    let target =
+        target.ok_or_else(|| format!("letter_fill: 未识别落点槽 (comps={})", comps.len()))?;
+    let t_xy = (target.x, target.y);
 
-    let bar = bar.ok_or_else(|| format!("letter_fill: 未识别空白横线 (comps={})", comps.len()))?;
-    let letter =
-        letter.ok_or_else(|| format!("letter_fill: 未识别字母 (comps={})", comps.len()))?;
+    // 字母: 排除目标后最大的近方块组件 (对角细线 bbox 极大, 被尺寸/长宽比排除)
+    let letter = comps
+        .iter()
+        .filter(|c| (c.x, c.y) != t_xy && c.h >= 14 && c.h <= 90 && (c.w.max(1) as f32 / c.h as f32) < 2.5)
+        .max_by_key(|c| c.area);
+    let letter = letter.ok_or_else(|| format!("letter_fill: 未识别字母 (comps={})", comps.len()))?;
 
     Ok(DragSolution {
         from: (letter.cx as f64, letter.cy as f64),
-        to: (bar.cx as f64, bar.cy as f64),
+        to: (target.cx as f64, target.cy as f64),
     })
 }
 
@@ -815,13 +819,21 @@ mod tests {
                 put(x, y);
             }
         }
-        // 白色字母块 28x28 (真实字形为实心), 中心 (299, 134)
+        // 衬线字母 "I": 竖笔 6x28 + 上下衬线 28x4 → 密度 ~0.44 (低于槽)
         for y in 120..148 {
-            for x in 285..313 {
+            for x in 296..302 {
                 put(x, y);
             }
         }
-        // 白色横线 36x12, 中心 (468, 118)
+        for x in 285..313 {
+            for y in 120..124 {
+                put(x, y);
+            }
+            for y in 144..148 {
+                put(x, y);
+            }
+        }
+        // 白色实心落点横条 36x12, 中心 (468, 118) — 密度 ~1.0
         for y in 112..124 {
             for x in 450..486 {
                 put(x, y);
@@ -845,6 +857,68 @@ mod tests {
             "to={:?}",
             sol.to
         );
+    }
+
+    #[test]
+    fn letter_fill_tilted_slot() {
+        // drag_fail.png 实测形态: 落点槽 = 斜线端头的倾斜短粗实心段
+        let (w, h) = (520usize, 409usize);
+        let mut px = vec![0u8; w * h * 3];
+        for p in px.chunks_mut(3) {
+            p.copy_from_slice(&[20, 45, 90]);
+        }
+        let mut put = |x: usize, y: usize| {
+            let i = (y * w + x) * 3;
+            px[i] = 245;
+            px[i + 1] = 245;
+            px[i + 2] = 248;
+        };
+        // 衬线字母 I, 中心 (285, 235)
+        for y in 221..249 {
+            for x in 282..288 {
+                put(x, y);
+            }
+        }
+        for x in 271..299 {
+            for y in 221..225 {
+                put(x, y);
+            }
+            for y in 245..249 {
+                put(x, y);
+            }
+        }
+        // 倾斜实心段 (每行右移 ~0.3px), 中心约 (460, 106)
+        for y in 92..120usize {
+            let off = ((y - 92) as f64 * 0.3) as usize;
+            for x in (442 + off)..(470 + off) {
+                put(x, y);
+            }
+        }
+        // 对角装饰细线 (2px 宽, 低密度, 不应抢落点)
+        for i in 0..330usize {
+            let x = 240 + i;
+            let y = 86 + i / 4;
+            if y < y_hi_px(h) && x < w {
+                put(x, y);
+                put(x, y + 1);
+            }
+        }
+
+        let sol = solve("Drag the letter to the place where it fits", &px, w, h).unwrap();
+        assert!(
+            (sol.from.0 - 285.0).abs() < 8.0 && (sol.from.1 - 235.0).abs() < 8.0,
+            "from={:?}",
+            sol.from
+        );
+        assert!(
+            (sol.to.0 - 460.0).abs() < 10.0 && (sol.to.1 - 106.0).abs() < 10.0,
+            "to={:?}",
+            sol.to
+        );
+    }
+
+    fn y_hi_px(h: usize) -> usize {
+        (h as f32 * 0.88) as usize
     }
 
     #[test]

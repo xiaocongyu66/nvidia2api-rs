@@ -1069,8 +1069,15 @@ async fn inner_vlm_solve(
     }
 
     // 主路径: 候选框 overlay 模式 (gpt-pp-team 实证: 编号选择比坐标直出准)
-    // 3x3 网格天然 9 个候选 (G1-G9 row-major), 480x480 拼图或截图均适用
-    let overlay_result = try_vlm_overlay(cfg, &png, prompt).await;
+    // 3x3 网格天然 9 个候选 (G1-G9 row-major), 480x480 拼图或截图均适用。
+    // drag 类画布无网格格子, overlay 编号必点错 (实测 letter 题 overlay 选中
+    // [1] 无效点击) → 跳过, 直落 solve_adaptive 的 drag 语义
+    let overlay_result = if super::drag::route_drag(prompt).is_some() {
+        println!("[vlm] drag 类 prompt, 跳过 overlay → solve_adaptive");
+        Ok(None)
+    } else {
+        try_vlm_overlay(cfg, &png, prompt).await
+    };
     match overlay_result {
         Ok(Some(indices)) => {
             if indices.is_empty() {
