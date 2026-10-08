@@ -1463,8 +1463,22 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
         println!("[vision] prompt 未知 (加密轮次), 默认 hot_food 语义组");
         prompt = "Select items safe for a hot oven".to_string();
     }
-    let type_key = super::vision::route_type(&prompt)
-        .ok_or_else(|| format!("unsupported prompt: {prompt}"))?;
+    let type_key = match super::vision::route_type(&prompt) {
+        Some(k) => k,
+        None => {
+            // 题型表未覆盖的新题 (如 "Choose 2 arrows outliers"/circuit-completion) —
+            // 回落 VLM 直出 (overlay G1-G9 + adaptive grid/point/drag)。此前这些题
+            // 100% unsupported→refresh 空转烧额度; VLM 兜底严格更优 (错则等同现状)。
+            if let Some(cfg) = super::vlm::config() {
+                println!("[vision] route_type 未命中 → VLM 兜底 (prompt={prompt:?})");
+                match inner_vlm_solve(page, data, &prompt, &cfg).await {
+                    Ok(()) => return Ok(()),
+                    Err(e) => println!("[vision] VLM 兜底失败: {e}"),
+                }
+            }
+            return Err(format!("unsupported prompt: {prompt}"));
+        }
+    };
     println!("[vision] 路由题型: {type_key} (prompt={prompt:?})");
     let spec = super::vision::spec_of(type_key).ok_or("spec missing")?;
 
