@@ -766,21 +766,43 @@ pub fn solve_letter_fill(px: &[u8], w: usize, h: usize) -> Result<DragSolution, 
     let density = |c: &Comp| -> f32 {
         c.area as f32 / (c.w.max(1) as f32 * c.h.max(1) as f32)
     };
+    // 落点槽判别: 实心小块, 密度最高 (横条 ~1.0, 倾斜短粗段 ~0.8; 衬线字母 <0.6)。
+    // 云团反光被 max边≤60 尺寸上限排除
+    let pick_slot = |cs: &[Comp]| -> Option<(f32, f32, i32, i32)> {
+        cs.iter()
+            .filter(|c| {
+                density(c) >= 0.5
+                    && c.area >= 100
+                    && c.area <= 2500
+                    && c.w.min(c.h) >= 5
+                    && c.w.max(c.h) <= 60
+            })
+            .max_by(|a, b| density(a).partial_cmp(&density(b)).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|c| (c.cx, c.cy, c.x, c.y))
+    };
 
-    // 落点槽: 实心小块, 密度最高 (横条 ~1.0, 倾斜短粗段 ~0.8; 衬线字母 <0.6)
-    let target = comps
-        .iter()
-        .filter(|c| {
-            density(c) >= 0.55
-                && c.area >= 120
-                && c.area <= 2500
-                && c.w.min(c.h) >= 6
-                && c.w.max(c.h) <= 60
-        })
-        .max_by(|a, b| density(a).partial_cmp(&density(b)).unwrap_or(std::cmp::Ordering::Equal));
-    let target =
-        target.ok_or_else(|| format!("letter_fill: 未识别落点槽 (comps={})", comps.len()))?;
-    let t_xy = (target.x, target.y);
+    let mut slot = pick_slot(&comps);
+    if slot.is_none() {
+        // 抗锯齿细槽被 V>180+开运算双重削没 (实测 comps=1 只剩字母) —
+        // 放宽阈值+跳过形态学再找一次槽; 字母仍用主掩码选, 不受松掩码噪声影响
+        let mut relaxed = vec![false; w * h];
+        for y in y_lo..y_hi {
+            for x in 0..w {
+                let i = (y * w + x) * 3;
+                let (r, g, b) = (px[i] as u32, px[i + 1] as u32, px[i + 2] as u32);
+                let v = r.max(g).max(b);
+                let mn = r.min(g).min(b);
+                if v > 150 && v - mn < 70 {
+                    relaxed[y * w + x] = true;
+                }
+            }
+        }
+        let rcomps = connected_components(&relaxed, w, h, 40);
+        slot = pick_slot(&rcomps);
+    }
+    let (tcx, tcy, t_x, t_y) =
+        slot.ok_or_else(|| format!("letter_fill: 未识别落点槽 (comps={})", comps.len()))?;
+    let t_xy = (t_x, t_y);
 
     // 字母: 排除目标后最大的近方块组件 (对角细线 bbox 极大, 被尺寸/长宽比排除)
     let letter = comps
@@ -791,7 +813,7 @@ pub fn solve_letter_fill(px: &[u8], w: usize, h: usize) -> Result<DragSolution, 
 
     Ok(DragSolution {
         from: (letter.cx as f64, letter.cy as f64),
-        to: (target.cx as f64, target.cy as f64),
+        to: (tcx as f64, tcy as f64),
     })
 }
 
@@ -919,6 +941,56 @@ mod tests {
 
     fn y_hi_px(h: usize) -> usize {
         (h as f32 * 0.88) as usize
+    }
+
+    #[test]
+    fn letter_fill_antsialias_slot_relaxed_fallback() {
+        // 槽被抗锯齿压到 v~170 (低于主阈值 180) → relaxed 二次找槽兜底
+        let (w, h) = (520usize, 409usize);
+        let mut px = vec![0u8; w * h * 3];
+        for p in px.chunks_mut(3) {
+            p.copy_from_slice(&[20, 45, 90]);
+        }
+        // 白色衬线 I, 中心 (285, 235)
+        let mut put = |x: usize, y: usize| {
+            let i = (y * w + x) * 3;
+            px[i] = 245;
+            px[i + 1] = 245;
+            px[i + 2] = 248;
+        };
+        for y in 221..249 {
+            for x in 282..288 {
+                put(x, y);
+            }
+        }
+        for x in 271..299 {
+            for y in 221..225 {
+                put(x, y);
+            }
+            for y in 245..249 {
+                put(x, y);
+            }
+        }
+        // 灰色落点槽 30x14 @ (450,105) — v=170, 主阈值照不到
+        for y in 98..112 {
+            for x in 435..465 {
+                let i = (y * w + x) * 3;
+                px[i] = 170;
+                px[i + 1] = 170;
+                px[i + 2] = 172;
+            }
+        }
+        let sol = solve("Drag the letter to the place where it fits", &px, w, h).unwrap();
+        assert!(
+            (sol.from.0 - 285.0).abs() < 8.0 && (sol.from.1 - 235.0).abs() < 8.0,
+            "from={:?}",
+            sol.from
+        );
+        assert!(
+            (sol.to.0 - 450.0).abs() < 8.0 && (sol.to.1 - 105.0).abs() < 8.0,
+            "to={:?}",
+            sol.to
+        );
     }
 
     #[test]
