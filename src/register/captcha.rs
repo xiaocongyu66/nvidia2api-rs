@@ -33,6 +33,7 @@ static REGISTER_STATUS: Mutex<Option<u16>> = Mutex::new(None);
 static LAST_GRID: Mutex<Option<[f64; 5]>> = Mutex::new(None);
 /// debug 存图只做一次
 static DEBUG_SAVED: AtomicBool = AtomicBool::new(false);
+static DEBUG_FAIL_SAVED: AtomicBool = AtomicBool::new(false);
 /// hCaptcha "Maximum requests" 限流时间戳 (unix ms) — 期间跳过 refresh/checkbox 点击
 static RATE_LIMITED: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 /// checkcaptcha 判定嗅探 — Some(true)=答对, Some(false)=答错; take() 读走即清, 提交前手动清防残留误判
@@ -1409,12 +1410,18 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
     if !prompt.is_empty() {
         *LAST_PROMPT.lock().unwrap() = Some(prompt.clone());
     }
-    // drag 类 prompt — 截图 CV 求解 (Phase2 拼图/配对算法), 失败再 refresh 换题
+    // drag 类 prompt — 截图 CV 求解 (Phase2 拼图/配对算法), 失败回落 VLM, 再 refresh 换题
     if super::drag::route_drag(&prompt).is_some() {
         println!("[vision] drag 类 prompt: 走截图 CV 求解");
         match solve_drag_screenshot(page, &prompt).await {
             Ok(()) => return Ok(()),
-            Err(e) => println!("[vision] drag CV 失败: {e}, refresh 换题"),
+            Err(e) => println!("[vision] drag CV 失败: {e}, 回落 VLM"),
+        }
+        if let Some(cfg) = super::vlm::config() {
+            match inner_vlm_solve(page, data, &prompt, &cfg).await {
+                Ok(()) => return Ok(()),
+                Err(e) => println!("[vision] drag VLM 兜底失败: {e}, refresh 换题"),
+            }
         }
         return Err("drag failed, refresh".into());
     }
@@ -1727,8 +1734,22 @@ async fn solve_drag_screenshot(page: &playwright_rs::Page, prompt: &str) -> Resu
     let cpx = crop.into_raw();
     println!("[vision] drag 截图模式: 画布{}x{}", cw, ch);
 
-    // 按路由分派子算法 (拼图 missing_pieces / 配对 pair_drag)
-    let sol = super::drag::solve(prompt, &cpx, cw, ch)?;
+    // 按路由分派子算法 (拼图 missing_pieces / 配对 pair_drag / letter_fill)
+    let sol = match super::drag::solve(prompt, &cpx, cw, ch) {
+        Ok(s) => s,
+        Err(e) => {
+            // 失败也存一次干净裁剪图 (无标注) — 否则 solve() 提前 return 永远看不到失败现场
+            if !DEBUG_FAIL_SAVED.swap(true, Ordering::Relaxed) {
+                let dir = std::path::Path::new("data/debug");
+                let _ = std::fs::create_dir_all(dir);
+                if let Some(v) = image::RgbImage::from_raw(cw as u32, ch as u32, cpx.clone()) {
+                    let _ = v.save(dir.join("drag_fail.png"));
+                    println!("[vision] drag 失败现场已存: data/debug/drag_fail.png (prompt={prompt:?})");
+                }
+            }
+            return Err(e);
+        }
+    };
     println!("[vision] drag 截图: from=({:.0},{:.0}) → to=({:.0},{:.0})", sol.from.0, sol.from.1, sol.to.0, sol.to.1);
     drag_repeat_check(cw, ch, sol.from.0, sol.from.1, sol.to.0, sol.to.1)?;
 
