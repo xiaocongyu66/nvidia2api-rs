@@ -366,8 +366,18 @@ pub fn route_type(prompt: &str) -> Option<&'static str> {
     if p.contains("scoop") {
         return Some("scoop_tools");
     }
-    if p.contains("mirror") {
+    if p.contains("mirror") || p.contains("reflection") {
         return Some("mirror_wrong");
+    }
+    // 12. 新实战题族 (v0.6.1): 可摘环 / 动物背对
+    if p.contains("rings") && (p.contains("lifted off") || p.contains("take off")) {
+        return Some("rings_liftable");
+    }
+    if (p.contains("looking your way") && p.contains("not"))
+        || p.contains("looking away")
+        || (p.contains("animals") && p.contains("away from you"))
+    {
+        return Some("animals_not_looking");
     }
     if p.contains("vehicle") && p.contains("move") {
         return Some("vehicle_move");
