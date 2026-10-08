@@ -776,8 +776,8 @@ pub fn solve_letter_fill(px: &[u8], w: usize, h: usize) -> Result<DragSolution, 
             Some((c.x, c.y)) != bar_xy
                 && c.h >= 14
                 && c.h <= 70
-                && c.w as f32 / c.h.max(1) as f32 > 0.3
-                && c.w as f32 / c.h.max(1) as f32 < 3.0
+                && (c.w as f32 / c.h.max(1) as f32) > 0.3
+                && (c.w as f32 / c.h.max(1) as f32) < 3.0
         })
         .max_by_key(|c| c.area);
 
