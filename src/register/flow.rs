@@ -32,6 +32,8 @@ fn now() -> std::time::Instant {
 type LogFn = Arc<dyn Fn(String) + Send + Sync>;
 
 fn log(s: &LogFn, msg: &str) {
+    // 镜像到 stdout → server.log, 否则 [7] 之后的链路在 grep 里是盲区
+    println!("[flow-log] {msg}");
     s(msg.to_string());
 }
 
