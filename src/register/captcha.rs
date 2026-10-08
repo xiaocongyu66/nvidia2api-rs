@@ -388,9 +388,9 @@ async fn inject_token(page: &playwright_rs::Page, token: &str) -> bool {
     }
     // 等 #register_button enable (最多 20s)
     let btn = page.locator("#register_button");
-    for _ in 0..20 {
+    for waited in 0..20 {
         if btn.count().await.unwrap_or(0) > 0 && btn.is_enabled().await.unwrap_or(false) {
-            println!("[vision] inject_token: register_button 已 enable (第 {}s)", 1 + _);
+            println!("[vision] inject_token: register_button 已 enable (第 {}s)", waited + 1);
             return true;
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
