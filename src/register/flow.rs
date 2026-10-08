@@ -394,15 +394,20 @@ pub async fn register_one(
             return Err("register submit failed after 3 attempts".into());
         }
 
-        // [7] 邮箱验证码 (重试 3 次)
+        // [7] 邮箱验证码 (重试 3 次); NVIDIA 邮件实测可迟于 180s 到达, 首轮 240s + 补轮 120s
         log(&logf, "[7] 等待验证码邮件…");
-        let mut code = poll_code(cfg, &inbox, 180).await;
+        let mut code = poll_code(cfg, &inbox, 240).await;
+        if code.is_none() {
+            log(&logf, "[7] 首轮未收到, 补一轮 120s 轮询…");
+            code = poll_code(cfg, &inbox, 120).await;
+        }
         let mut ok_code = false;
         for attempt in 1..=3 {
             let Some(c) = code.clone() else {
                 log(&logf, "[7] 未收到验证码");
                 return Err("no verification code".into());
             };
+            log_eprintln(&format!("[flow] got verification code: {c}"));
             if attempt > 1 {
                 log(&logf, &format!("[7] 请求新验证码 (第 {attempt}/3 次)…"));
                 let link_texts = ["请求新验证码", "重新请求新验证码", "request new code", "resend code"];
