@@ -377,12 +377,15 @@ pub async fn register_one(
             let st = captcha::wait_register_response(45).await.unwrap_or(0);
             if (200..300).contains(&st) {
                 log(&logf, &format!("[6] register accepted ({st})"));
+                log_eprintln(&format!("[flow] register accepted ({st})"));
                 accepted = true;
                 break;
             }
             if st == 409 {
                 return Err("email already registered".into());
             }
+            // 镜像到 server.log — rejected 状态码是定位"答对但提交被拒"的唯一线索
+            log_eprintln(&format!("[flow] register rejected (st={st})"));
             log(&logf, &format!("[6] register rejected ({st}), 重试…"));
         }
         if !accepted {
