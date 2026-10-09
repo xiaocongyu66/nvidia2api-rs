@@ -1697,6 +1697,27 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
             {
                 println!("[vision] widget 结构探针: {v}");
             }
+            // 一次性 DOM 地形图: 所有 60-300px 的可见元素 tag.class + 尺寸, 定位真实 tile 选择器
+            if let Ok(v) = frame
+                .evaluate::<Value>(
+                    r#"(() => {
+  const out = [];
+  for (const el of document.querySelectorAll('body *')) {
+    const r = el.getBoundingClientRect();
+    if (r.width >= 60 && r.width <= 300 && r.height >= 60 && r.height <= 300 && r.y > 0) {
+      const cls = (typeof el.className === 'string' ? el.className : '').trim().replace(/\s+/g, '.').slice(0, 40);
+      const bg = (getComputedStyle(el).backgroundImage || '').slice(0, 30);
+      out.push(el.tagName + '.' + cls + '|' + Math.round(r.width) + 'x' + Math.round(r.height) + '@' + Math.round(r.x) + ',' + Math.round(r.y) + (bg !== 'none' ? '|bg' : ''));
+    }
+  }
+  return out.slice(0, 30).join('\n');
+})()"#,
+                    None,
+                )
+                .await
+            {
+                println!("[vision] DOM 地形图: {v:?}");
+            }
             if try_js_click_new_widget(page, set).await {
                 return Ok(());
             }
