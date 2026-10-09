@@ -306,6 +306,10 @@ pub fn route_type(prompt: &str) -> Option<&'static str> {
     {
         return None;
     }
+    // 2.5 gardening 二元题 (实测: 滑雪板 vs 耙子, tasklist=2)
+    if p.contains("garden") {
+        return Some("gardening");
+    }
     // 3. float on water
     if p.contains("float") && p.contains("water") {
         return Some("float_on_water");
@@ -406,6 +410,7 @@ mod tests {
         assert_eq!(route_type("Please drag the object to complete the pair"), None);
         assert_eq!(route_type("drag the missing piece into place"), None);
         assert_eq!(route_type("Please click on the object that can float on water"), Some("float_on_water"));
+        assert_eq!(route_type("Click on the item used for gardening"), Some("gardening"));
         assert_eq!(route_type("click the item that is served hot"), Some("hot_food"));
     }
 
