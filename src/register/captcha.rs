@@ -1735,7 +1735,56 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
                 .force(true)
                 .timeout(4000.0)
                 .build();
-            for &i in set {
+            // set 是 tasklist 数组索引, DOM .task-image 顺序与之无一致性保证 —
+            // 读 DOM 每格图 URL, 按文件名映射回真实 nth (顺序一致时=恒等)
+            let remapped: Vec<usize> = {
+                let tl_urls: Vec<String> = GETCAPTCHA.lock().unwrap().as_ref().map(|v| {
+                    v["tasklist"].as_array().map(|a| {
+                        a.iter().filter_map(|t| t["datapoint_uri"].as_str().map(String::from)).collect()
+                    }).unwrap_or_default()
+                }).unwrap_or_default();
+                let dom_urls: Vec<String> = frame
+                    .evaluate::<Value>(
+                        r#"(() => [...document.querySelectorAll('.task-image')].map(el => {
+  const im = el.tagName === 'IMG' ? el : el.querySelector('img');
+  if (im && im.src) return im.src;
+  const q = el.querySelector('.image');
+  if (q) { const bg = (q.style && q.style.backgroundImage) || getComputedStyle(q).backgroundImage || ''; const m = bg.match(/url\(["']?([^"')]+)["']?\)/); if (m) return m[1]; }
+  const bg2 = (el.style && el.style.backgroundImage) || getComputedStyle(el).backgroundImage || '';
+  const m2 = bg2.match(/url\(["']?([^"')]+)["']?\)/);
+  return m2 ? m2[1] : '';
+}))()"#,
+                        None,
+                    )
+                    .await
+                    .ok()
+                    .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+                    .unwrap_or_default();
+                let key = |u: &str| -> String {
+                    let u = u.split('?').next().unwrap_or(u);
+                    u.rsplit('/').next().unwrap_or("").to_string()
+                };
+                let mut dom_idx: std::collections::HashMap<String, usize> = Default::default();
+                for (d, u) in dom_urls.iter().enumerate() {
+                    let k = key(u);
+                    if !k.is_empty() {
+                        dom_idx.entry(k).or_insert(d);
+                    }
+                }
+                if tl_urls.len() >= set.len().max(1) && !dom_idx.is_empty() {
+                    set.iter()
+                        .map(|&i| {
+                            tl_urls.get(i).and_then(|u| dom_idx.get(&key(u))).copied().unwrap_or(i)
+                        })
+                        .collect()
+                } else {
+                    set.to_vec()
+                }
+            };
+            if remapped != set.to_vec() {
+                println!("[vision] tile 索引 URL 对齐重映射: {set:?} → {remapped:?}");
+            }
+            for &i in &remapped {
                 if (i as i32) < tcount as i32 {
                     let loc = frame.locator(sel).nth(i as i32);
                     // force 点击不做滚动, widget 高于窗口时报 outside of viewport
