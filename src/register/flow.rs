@@ -160,7 +160,7 @@ pub async fn register_one(
         "--no-first-run".to_string(),
         "--no-default-browser-check".to_string(),
         "--disable-infobars".to_string(),
-        "--window-size=1280,720".to_string(),
+        "--window-size=1280,1024".to_string(),
         "--start-maximized".to_string(),
     ];
     let mut used_proxy: Option<String> = None;
