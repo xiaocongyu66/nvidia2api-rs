@@ -1733,6 +1733,7 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
 
     // 路线 B: 物理坐标
     println!("[vision] 点击路线 B: 物理坐标 (frame 树未 attach)");
+    // 实测坑: challenge iframe 弹出前停靠在 y=-9999 (不可见), 选中它点击=全打屏幕外
     let js = r#"(() => {
         const fs = [...document.querySelectorAll('iframe')].filter(f => {
             if (!(f.src||'').includes('hcaptcha')) return false;
@@ -1740,21 +1741,31 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
             // challenge iframe 高度 >400; checkbox 仅 ~74 高
             return r.width > 250 && r.height > 400;
         });
-        if (!fs.length) return null;
-        let best = fs[0];
-        for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
+        const vis = fs.filter(f => f.getBoundingClientRect().y > -100);
+        if (!vis.length) return null;
+        let best = vis[0];
+        for (const f of vis) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
         const r = best.getBoundingClientRect();
         return JSON.stringify([r.x + (window.scrollX||0), r.y + (window.scrollY||0), r.width, r.height]);
     })()"#;
-    let v = page
-        .evaluate::<Value, Value>(js, None)
-        .await
-        .map_err(|e| format!("iframe rect: {e}"))?;
-    let s = v.as_str().ok_or("challenge iframe 未找到 (路线B)")?;
-    let arr: Vec<f64> = serde_json::from_str(s).map_err(|e| format!("rect 解析: {e}"))?;
-    if arr.len() != 4 {
-        return Err("rect 数据不完整".into());
+    let mut arr: Option<Vec<f64>> = None;
+    for attempt in 0..5 {
+        let v = page
+            .evaluate::<Value, Value>(js, None)
+            .await
+            .map_err(|e| format!("iframe rect: {e}"))?;
+        if let Some(s) = v.as_str() {
+            if let Ok(a) = serde_json::from_str::<Vec<f64>>(s) {
+                if a.len() == 4 {
+                    arr = Some(a);
+                    break;
+                }
+            }
+        }
+        println!("[vision] 路线B 可见 challenge iframe 未就绪 (第{}次), 等待弹出", attempt + 1);
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     }
+    let arr = arr.ok_or("challenge iframe 未弹出可见区 (路线B)")?;
     let (rx, ry, rw, _rh) = (arr[0], arr[1], arr[2], arr[3]);
     println!("[vision] challenge iframe rect=({rx:.0},{ry:.0} {rw:.0}x{_rh:.0})");
     // 优先用截图模式实测的网格 (同坐标系), 无则常量回退
@@ -1796,9 +1807,10 @@ async fn solve_drag_screenshot(page: &playwright_rs::Page, prompt: &str) -> Resu
             const r = f.getBoundingClientRect();
             return r.width > 250 && r.height > 400;
         });
-        if (!fs.length) return null;
-        let best = fs[0];
-        for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
+        const vis = fs.filter(f => f.getBoundingClientRect().y > -100);
+        if (!vis.length) return null;
+        let best = vis[0];
+        for (const f of vis) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
         const r = best.getBoundingClientRect();
         return JSON.stringify([r.x + (window.scrollX||0), r.y + (window.scrollY||0), r.width, r.height]);
     })()"#;

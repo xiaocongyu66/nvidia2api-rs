@@ -380,6 +380,8 @@ pub fn route_type(prompt: &str) -> Option<&'static str> {
     if (p.contains("looking your way") && p.contains("not"))
         || p.contains("looking away")
         || (p.contains("animals") && p.contains("away from you"))
+        || p.contains("meet your eye")
+        || p.contains("eye contact")
     {
         return Some("animals_not_looking");
     }
@@ -412,6 +414,8 @@ mod tests {
         assert_eq!(route_type("Please click on the object that can float on water"), Some("float_on_water"));
         assert_eq!(route_type("Click on the item used for gardening"), Some("gardening"));
         assert_eq!(route_type("click the item that is served hot"), Some("hot_food"));
+        assert_eq!(route_type("Select all animals that do not meet your eye"), Some("animals_not_looking"));
+        assert_eq!(route_type("click animals that do not make eye contact"), Some("animals_not_looking"));
     }
 
     /// 诊断: 已知题型图片 × 全部语义组的得分矩阵 (cargo test 时人工判读)
