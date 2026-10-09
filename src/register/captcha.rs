@@ -1631,34 +1631,45 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
         let tcount = if count > 0 { count } else { frame.locator(".task-image").count().await.unwrap_or(0) };
         println!("[vision] task-image count={tcount} (sel={sel})");
         if tcount == 0 {
-            return Err("task-image 元素不存在 (widget 改版?)".into());
-        }
-        for &i in set {
-            if (i as i32) < tcount as i32 {
-                if let Err(e) = frame.locator(sel).nth(i as i32).click(None).await {
-                    println!("[vision] tile{i} 点击失败: {e}");
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            // widget 改版 (.task-image 不存在, 实测 e97a50d7 版): 探结构 + 回落路线 B
+            if let Ok(v) = frame
+                .evaluate::<Value, Value>(
+                    "(() => { const q=s=>document.querySelectorAll(s).length; return JSON.stringify({task:q('.task-image'),img:q('.image'),canvas:q('canvas'),tile:q('[class*=tile]'),anchor:q('[class*=anchor]'),submit:q('.button-submit'),arrow:q('[class*=submit]')}); })()",
+                    None,
+                )
+                .await
+            {
+                println!("[vision] widget 结构探针: {v}");
             }
-        }
-        let submit = frame.locator(".button-submit");
-        let mut submitted = false;
-        for _ in 0..10 {
-            if submit.count().await.unwrap_or(0) > 0 && submit.is_enabled().await.unwrap_or(false) {
-                match submit.click(None).await {
-                    Ok(()) => submitted = true,
-                    Err(e) => println!("[vision] submit 点击失败: {e}"),
+            println!("[vision] .task-image 缺失, 回落路线 B 物理坐标");
+        } else {
+            for &i in set {
+                if (i as i32) < tcount as i32 {
+                    if let Err(e) = frame.locator(sel).nth(i as i32).click(None).await {
+                        println!("[vision] tile{i} 点击失败: {e}");
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                 }
-                break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            let submit = frame.locator(".button-submit");
+            let mut submitted = false;
+            for _ in 0..10 {
+                if submit.count().await.unwrap_or(0) > 0 && submit.is_enabled().await.unwrap_or(false) {
+                    match submit.click(None).await {
+                        Ok(()) => submitted = true,
+                        Err(e) => println!("[vision] submit 点击失败: {e}"),
+                    }
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            }
+            println!("[vision] submit 已点击: {submitted}");
+            if !submitted {
+                return Err(".button-submit 未找到或未启用".into());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            return Ok(());
         }
-        println!("[vision] submit 已点击: {submitted}");
-        if !submitted {
-            return Err(".button-submit 未找到或未启用".into());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
-        return Ok(());
     }
 
     // 路线 B: 物理坐标
