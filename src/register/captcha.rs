@@ -1623,6 +1623,47 @@ async fn capture_challenge_tiles(
 /// A. challenge frame (locator 精确点击)
 /// B. frame 树失效时物理坐标: challenge iframe 的 bounding rect + 标准网格布局推算 tile 中心
 ///    (hCaptcha challenge iframe 内部布局: 左右 padding~20, prompt 高~90, tile 均分剩余宽度)
+/// C. 新 widget (e97a50d7+): challenge DOM 疑在嵌套 iframe, 旧选择器全空 (实测 anchor:3 其余 0)。
+/// 扫描全部 frame 找大 img 元素, 页内 JS 原生 click() 提交。
+async fn try_js_click_new_widget(page: &playwright_rs::Page, set: &[usize]) -> bool {
+    let Ok(frames) = page.frames().await else { return false };
+    let set_json = serde_json::to_string(set).unwrap_or_else(|_| "[]".into());
+    for f in &frames {
+        let Ok(nv) = f
+            .evaluate::<Value>(
+                "(() => [...document.querySelectorAll('img')].filter(i => i.offsetWidth > 40 && i.offsetHeight > 40).length)()",
+                None,
+            )
+            .await
+        else {
+            continue;
+        };
+        let Some(n) = nv.as_u64() else { continue };
+        if n < 2 {
+            continue;
+        }
+        println!("[vision] 路线C 命中 frame: {} imgs={n}", f.url().chars().take(60).collect::<String>());
+        let js_click = format!(
+            "(() => {{ const g=[...document.querySelectorAll('img')].filter(i => i.offsetWidth > 40 && i.offsetHeight > 40); {set_json}.forEach(i => g[i] && g[i].click()); return g.length }})()"
+        );
+        if let Err(e) = f.evaluate::<Value>(&js_click, None).await {
+            println!("[vision] 路线C tile 点击失败: {e}");
+            continue;
+        }
+        println!("[vision] 路线C tile 点击完成 set={set:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        let js_submit = "(() => { const s = document.querySelector('.button-submit, [class*=submit], [class*=arrow]'); if (s) { s.click(); return 1 } const bs=[...document.querySelectorAll('div,button')].filter(b => b.offsetWidth>20&&b.offsetHeight>20&&b.getBoundingClientRect().bottom > window.innerHeight-120); if (bs.length) { bs[bs.length-1].click(); return 2 } return 0 })()";
+        match f.evaluate::<Value>(js_submit, None).await {
+            Ok(v) => println!("[vision] 路线C submit: {v}"),
+            Err(e) => println!("[vision] 路线C submit 失败: {e}"),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        return true;
+    }
+    println!("[vision] 路线C: 无任何 frame 含 >=2 大 img (新 widget 或为 canvas/背景图渲染)");
+    false
+}
+
 async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Result<(), String> {
     if let Some(frame) = find_challenge_frame_wait(page, 5_000).await {
         println!("[vision] 点击路线 A: challenge frame");
@@ -1641,7 +1682,10 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
             {
                 println!("[vision] widget 结构探针: {v}");
             }
-            println!("[vision] .task-image 缺失, 回落路线 B 物理坐标");
+            if try_js_click_new_widget(page, set).await {
+                return Ok(());
+            }
+            println!("[vision] .task-image 缺失且路线C未中, 回落路线 B 物理坐标");
         } else {
             for &i in set {
                 if (i as i32) < tcount as i32 {
