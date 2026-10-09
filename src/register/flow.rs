@@ -2,7 +2,7 @@
 
 use super::captcha::{self, SolverConfig};
 use super::email::{CloudflareTempEmail, DuckMail, Inbox, MoeMail};
-use playwright_rs::{AriaRole, GetByRoleOptions, Playwright};
+use playwright_rs::{AriaRole, GetByRoleOptions, GotoOptions, Playwright, WaitUntil};
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -241,6 +241,17 @@ pub async fn register_one(
                     log(&logf, &format!("[3] <a> 登录链接点击: {href}"));
                 }
             }
+        }
+        // 二次兜底: <a> 点击不弹时直接导航 ?modal=signin (实测成功轮的 URL 形态)
+        if find_frame_with(&page, "input[name=\"email\"]").await.is_none() {
+            log(&logf, "[3] 弹窗未现, 直接导航 ?modal=signin");
+            let _ = page
+                .goto(
+                    "https://build.nvidia.com/?modal=signin",
+                    Some(GotoOptions::default().wait_until(WaitUntil::DomContentLoaded)),
+                )
+                .await;
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
         // 等弹窗 (SSO iframe) 渲染: 跨 frame 找 email input
         let deadline = now() + std::time::Duration::from_secs(20);
