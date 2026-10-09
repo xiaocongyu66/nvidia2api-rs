@@ -1628,19 +1628,34 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
         println!("[vision] 点击路线 A: challenge frame");
         let count = frame.locator(".task-image .image").count().await.unwrap_or(0);
         let sel = if count > 0 { ".task-image .image" } else { ".task-image" };
+        let tcount = if count > 0 { count } else { frame.locator(".task-image").count().await.unwrap_or(0) };
+        println!("[vision] task-image count={tcount} (sel={sel})");
+        if tcount == 0 {
+            return Err("task-image 元素不存在 (widget 改版?)".into());
+        }
         for &i in set {
-            if (i as i32) < count as i32 || count == 0 {
-                let _ = frame.locator(sel).nth(i as i32).click(None).await;
+            if (i as i32) < tcount {
+                if let Err(e) = frame.locator(sel).nth(i as i32).click(None).await {
+                    println!("[vision] tile{i} 点击失败: {e}");
+                }
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
         }
         let submit = frame.locator(".button-submit");
+        let mut submitted = false;
         for _ in 0..10 {
             if submit.count().await.unwrap_or(0) > 0 && submit.is_enabled().await.unwrap_or(false) {
-                let _ = submit.click(None).await;
+                match submit.click(None).await {
+                    Ok(()) => submitted = true,
+                    Err(e) => println!("[vision] submit 点击失败: {e}"),
+                }
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        }
+        println!("[vision] submit 已点击: {submitted}");
+        if !submitted {
+            return Err(".button-submit 未找到或未启用".into());
         }
         tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
         return Ok(());
