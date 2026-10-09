@@ -800,7 +800,13 @@ async fn fetch_tile_images(
                 .collect()
         })
         .unwrap_or_default();
-    if !urls.is_empty() {
+    // 实测坑: 新 widget 的 tasklist 可能是类别标签 (gaming/sports=2, drag=1),
+    // datapoint_uri ≠ 网格 tile; 只有恰好 9 张才与 3×3 网格一一对应 (animals 9/9 实证)。
+    // 误信 2/1 张会让 VLM 看图错位, 且跳过来源1.5 → LAST_GRID 无标定 → 路线B 常量乱点
+    if urls.len() != 9 && !urls.is_empty() {
+        println!("[vision] tasklist datapoint_uri={} 张 ≠9 (类别标签非网格), 跳过, 走截图切图", urls.len());
+    }
+    if urls.len() == 9 {
         let mut out = Vec::new();
         let mut ok = true;
         for (i, u) in urls.iter().enumerate() {
