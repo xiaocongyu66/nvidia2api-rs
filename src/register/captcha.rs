@@ -1710,7 +1710,12 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
                 .build();
             for &i in set {
                 if (i as i32) < tcount as i32 {
-                    if let Err(e) = frame.locator(sel).nth(i as i32).click(click_opts.clone()).await {
+                    let loc = frame.locator(sel).nth(i as i32);
+                    // force 点击不做滚动, widget 高于窗口时报 outside of viewport
+                    if let Err(e) = loc.scroll_into_view_if_needed().await {
+                        println!("[vision] tile{i} 滚动失败: {e}");
+                    }
+                    if let Err(e) = loc.click(click_opts.clone()).await {
                         println!("[vision] tile{i} 点击失败: {e}");
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -1720,6 +1725,7 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
             let mut submitted = false;
             for _ in 0..10 {
                 if submit.count().await.unwrap_or(0) > 0 && submit.is_enabled().await.unwrap_or(false) {
+                    let _ = submit.scroll_into_view_if_needed().await;
                     match submit.click(click_opts.clone()).await {
                         Ok(()) => submitted = true,
                         Err(e) => println!("[vision] submit 点击失败: {e}"),
