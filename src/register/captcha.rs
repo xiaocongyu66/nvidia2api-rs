@@ -1629,6 +1629,11 @@ async fn try_js_click_new_widget(page: &playwright_rs::Page, set: &[usize]) -> b
     let Ok(frames) = page.frames().await else { return false };
     let set_json = serde_json::to_string(set).unwrap_or_else(|_| "[]".into());
     for f in &frames {
+        // 仅限 hcaptcha 域 frame — 主页面大 img (banner/产品图) 会误触发
+        let url = f.url();
+        if !(url.contains("hcaptcha") || url.contains("newassets")) {
+            continue;
+        }
         let Ok(nv) = f
             .evaluate::<Value>(
                 "(() => [...document.querySelectorAll('img')].filter(i => i.offsetWidth > 40 && i.offsetHeight > 40).length)()",
@@ -1646,11 +1651,21 @@ async fn try_js_click_new_widget(page: &playwright_rs::Page, set: &[usize]) -> b
         let js_click = format!(
             "(() => {{ const g=[...document.querySelectorAll('img')].filter(i => i.offsetWidth > 40 && i.offsetHeight > 40); {set_json}.forEach(i => g[i] && g[i].click()); return g.length }})()"
         );
-        if let Err(e) = f.evaluate::<Value>(&js_click, None).await {
-            println!("[vision] 路线C tile 点击失败: {e}");
-            continue;
+        match f.evaluate::<Value>(&js_click, None).await {
+            Ok(v) => {
+                let gi = v.as_u64().unwrap_or(0);
+                if let Some(&mx) = set.iter().max() {
+                    if (mx as u64) >= gi {
+                        println!("[vision] 路线C 索引越界: set={set:?} 但只有 {gi} imgs");
+                    }
+                }
+                println!("[vision] 路线C tile 点击完成 set={set:?} imgs={gi}");
+            }
+            Err(e) => {
+                println!("[vision] 路线C tile 点击失败: {e}");
+                continue;
+            }
         }
-        println!("[vision] 路线C tile 点击完成 set={set:?}");
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         let js_submit = "(() => { const s = document.querySelector('.button-submit, [class*=submit], [class*=arrow]'); if (s) { s.click(); return 1 } const bs=[...document.querySelectorAll('div,button')].filter(b => b.offsetWidth>20&&b.offsetHeight>20&&b.getBoundingClientRect().bottom > window.innerHeight-120); if (bs.length) { bs[bs.length-1].click(); return 2 } return 0 })()";
         match f.evaluate::<Value>(js_submit, None).await {
