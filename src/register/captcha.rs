@@ -828,7 +828,9 @@ async fn fetch_tile_images(
     // 来源 1.5: 全页截图切 3x3 (不依赖 challenge frame — 加密响应时的主力)
     if let Ok((tiles, grid)) = capture_challenge_tiles(page).await {
         println!("[vision] tile 来源: 页面截图 ({}张)", tiles.len());
-        *LAST_GRID.lock().unwrap() = Some(grid);
+        if grid.is_some() {
+            *LAST_GRID.lock().unwrap() = grid;
+        }
         return Ok(tiles);
     }
 
@@ -1532,7 +1534,7 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
 /// 坐标系与路线 B (物理点击) 完全一致。
 async fn capture_challenge_tiles(
     page: &playwright_rs::Page,
-) -> Result<(Vec<(String, Vec<u8>)>, [f64; 5]), String> {
+) -> Result<(Vec<(String, Vec<u8>)>, Option<[f64; 5]>), String> {
     let js = r#"(() => {
         const fs = [...document.querySelectorAll('iframe')].filter(f => {
             if (!(f.src||'').includes('hcaptcha')) return false;
@@ -1578,15 +1580,15 @@ async fn capture_challenge_tiles(
     let cpx = crop.into_raw();
 
     // 自动网格检测 (实测 tile 位置), 失败退回常量猜测
-    let (gx, gy, gt) = match super::drag::detect_grid_3x3(&cpx, cw, ch) {
+    let (gx, gy, gt, measured) = match super::drag::detect_grid_3x3(&cpx, cw, ch) {
         Some((gx, gy, gt)) => {
             println!("[vision] 网格实测: 起点=({gx:.0},{gy:.0}) tile={gt:.0}px");
-            (gx, gy, gt)
+            (gx, gy, gt, true)
         }
         None => {
             let g = (rw - 40.0) / 3.0;
             println!("[vision] 网格检测失败, 常量回退 pad=20 top=90 tile={g:.0}");
-            (20.0, 90.0, g)
+            (20.0, 90.0, g, false)
         }
     };
 
@@ -1599,7 +1601,8 @@ async fn capture_challenge_tiles(
             println!("[vision] debug 图已存: data/debug/iframe_crop.png ({}x{})", cw, ch);
         }
     }
-    let grid = [rx, ry, gx, gy, gt];
+    // 只有实测网格才可进 LAST_GRID: 常量回退曾被当作"复用实测网格"跨轮缓存, 永远点同一组错格
+    let grid = if measured { Some([rx, ry, gx, gy, gt]) } else { None };
 
     let crop_img = image::RgbImage::from_raw(cw as u32, ch as u32, cpx).ok_or("裁剪重建失败")?;
     let mut out = Vec::new();

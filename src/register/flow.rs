@@ -332,6 +332,22 @@ pub async fn register_one(
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
         let Some(pw_frame) = pw_frame else {
+            // 超时诊断快照: dump 每个 frame 的 URL + 可见文本, 定位卡在哪个环节
+            if let Ok(frames) = page.frames().await {
+                for f in frames {
+                    let url = f.url();
+                    let text: String = f
+                        .evaluate::<Value>(
+                            "(() => document.body ? document.body.innerText.replace(/\\s+/g,' ').slice(0,300) : '')()",
+                            None,
+                        )
+                        .await
+                        .ok()
+                        .and_then(|v| v.as_str().map(String::from))
+                        .unwrap_or_default();
+                    log(&logf, &format!("[5-diag] frame {url} | {text}"));
+                }
+            }
             return Err("password field never appeared".into());
         };
         let pw_input = pw_frame.locator("#registration_password").first();
