@@ -1633,7 +1633,7 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
         if tcount == 0 {
             // widget 改版 (.task-image 不存在, 实测 e97a50d7 版): 探结构 + 回落路线 B
             if let Ok(v) = frame
-                .evaluate::<Value, Value>(
+                .evaluate::<Value>(
                     "(() => { const q=s=>document.querySelectorAll(s).length; return JSON.stringify({task:q('.task-image'),img:q('.image'),canvas:q('canvas'),tile:q('[class*=tile]'),anchor:q('[class*=anchor]'),submit:q('.button-submit'),arrow:q('[class*=submit]')}); })()",
                     None,
                 )
