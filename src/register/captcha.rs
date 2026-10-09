@@ -1634,7 +1634,7 @@ async fn click_tiles_and_submit(page: &playwright_rs::Page, set: &[usize]) -> Re
             return Err("task-image 元素不存在 (widget 改版?)".into());
         }
         for &i in set {
-            if (i as i32) < tcount {
+            if (i as i32) < tcount as i32 {
                 if let Err(e) = frame.locator(sel).nth(i as i32).click(None).await {
                     println!("[vision] tile{i} 点击失败: {e}");
                 }
