@@ -189,18 +189,38 @@ pub async fn register_one(
     if display {
         log(&logf, "[browser] Xvfb headed 模式 (真浏览器特征)");
     }
-    let browser = match pw
-        .chromium()
-        .launch_with_options(
-            playwright_rs::LaunchOptions::new()
-                .headless(headless)
-                .args(args),
-        )
-        .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            let m = format!("[✗] chromium 启动失败: {e} (需 playwright install chromium)");
+    // proot 下 chromium 冷启动偶发 30s 协议超时 (r6/r10 实测, 与线路无关) — 清残留重拉一次
+    let mut browser = None;
+    let mut last_err = String::new();
+    for attempt in 1..=2u32 {
+        match pw
+            .chromium()
+            .launch_with_options(
+                playwright_rs::LaunchOptions::new()
+                    .headless(headless)
+                    .args(args.clone()),
+            )
+            .await
+        {
+            Ok(b) => {
+                browser = Some(b);
+                break;
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                if attempt == 1 {
+                    log(&logf, &format!("[browser] chromium 启动失败 (1/2): {}, 清残留重拉…", last_err.lines().next().unwrap_or("")));
+                    let _ = tokio::process::Command::new("pkill").args(["-9", "-x", "chrome"]).status().await;
+                    let _ = tokio::process::Command::new("pkill").args(["-9", "-f", "playwrigh[t]"]).status().await;
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                }
+            }
+        }
+    }
+    let browser = match browser {
+        Some(b) => b,
+        None => {
+            let m = format!("[✗] chromium 启动失败: {last_err} (需 playwright install chromium)");
             log(&logf, &m);
             return Err(m);
         }
