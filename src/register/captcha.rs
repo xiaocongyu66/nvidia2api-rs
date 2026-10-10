@@ -569,10 +569,10 @@ async fn solve_sidecar(page: &playwright_rs::Page, timeout_secs: u64) -> Result<
 
 /// 求解 + 注入。返回 token 是否成功生效。
 pub async fn solve_and_inject(page: &playwright_rs::Page, cfg: &SolverConfig) -> Result<(), String> {
-    if cfg.mode == "onnx" {
-        return match solve_onnx(page, 180).await {
+    if cfg.mode == "vlm" {
+        return match solve_vlm_local(page, 180).await {
             Ok(t) if inject_token(page, &t).await => Ok(()),
-            Ok(_) => Err("onnx token injected but register button stayed disabled".into()),
+            Ok(_) => Err("vlm token injected but register button stayed disabled".into()),
             Err(e) => Err(e),
         };
     }
@@ -613,7 +613,7 @@ pub async fn solve_and_inject(page: &playwright_rs::Page, cfg: &SolverConfig) ->
     }
 }
 
-/// 挂 getcaptcha 响应嗅探 (onnx 模式用) — 挑战数据落 GETCAPTCHA 槽。
+/// 挂 getcaptcha 响应嗅探 (vlm 模式用) — 挑战数据落 GETCAPTCHA 槽。
 async fn watch_getcaptcha(page: &playwright_rs::Page) {
     *GETCAPTCHA.lock().unwrap() = None;
     let _ = page
@@ -821,118 +821,6 @@ async fn download_tile(client: &reqwest::Client, url: &str, ua: &str) -> Option<
     None
 }
 
-/// 取 9 张 tile 图 — 多级来源: tasklist → 全页截图切图 → CSS → 元素截图。
-async fn fetch_tile_images(
-    page: &playwright_rs::Page,
-    data: &Value,
-    ua: &str,
-) -> Result<Vec<(String, Vec<u8>)>, String> {
-    let client = http();
-
-    // 来源 1: getcaptcha tasklist (全分辨率原图)
-    let urls: Vec<String> = data["tasklist"]
-        .as_array()
-        .map(|l| {
-            l.iter()
-                .filter_map(|t| t["datapoint_uri"].as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-    // 实测坑: 新 widget 的 tasklist 可能是类别标签 (gaming/sports=2, drag=1),
-    // datapoint_uri ≠ 网格 tile; 只有恰好 9 张才与 3×3 网格一一对应 (animals 9/9 实证)。
-    // 误信 2/1 张会让 VLM 看图错位, 且跳过来源1.5 → LAST_GRID 无标定 → 路线B 常量乱点
-    if urls.len() != 9 && !urls.is_empty() {
-        println!("[vision] tasklist datapoint_uri={} 张 ≠9 (类别标签非网格), 跳过, 走截图切图", urls.len());
-    }
-    if urls.len() == 9 {
-        let mut out = Vec::new();
-        let mut ok = true;
-        for (i, u) in urls.iter().enumerate() {
-            match download_tile(&client, u, ua).await {
-                Some(b) => out.push((format!("tasklist-{i}"), b)),
-                None => {
-                    ok = false;
-                    break;
-                }
-            }
-        }
-        if ok && !out.is_empty() {
-            println!("[vision] tile 来源: getcaptcha tasklist ({}张)", out.len());
-            return Ok(out);
-        }
-        println!("[vision] tasklist 下载失败, 降级");
-    }
-
-    // 来源 1.5: 全页截图切 3x3 (不依赖 challenge frame — 加密响应时的主力)
-    if let Ok((tiles, grid)) = capture_challenge_tiles(page).await {
-        println!("[vision] tile 来源: 页面截图 ({}张)", tiles.len());
-        if grid.is_some() {
-            *LAST_GRID.lock().unwrap() = grid;
-        }
-        return Ok(tiles);
-    }
-
-    // 来源 2: challenge frame 里 .task-image .image 的 background-image CSS
-    if let Some(frame) = find_challenge_frame(page).await {
-        let js = r#"(() => {
-            const els = document.querySelectorAll('.task-image .image, .task-image');
-            const out = [];
-            for (const el of els) {
-                const bg = (el.style && el.style.backgroundImage) || '';
-                const m = bg.match(/url\(["']?([^"')]+)["']?\)/);
-                out.push(m ? m[1] : '');
-            }
-            return JSON.stringify(out);
-        })()"#;
-        if let Ok(v) = frame.evaluate::<Value>(js, None).await {
-            if let Some(s) = v.as_str() {
-            if let Ok(list) = serde_json::from_str::<Vec<String>>(s) {
-                let mut out = Vec::new();
-                let mut ok = true;
-                for (i, u) in list.iter().enumerate() {
-                    if u.is_empty() {
-                        ok = false;
-                        break;
-                    }
-                    match download_tile(&client, u, ua).await {
-                        Some(b) => out.push((format!("css-{i}"), b)),
-                        None => {
-                            ok = false;
-                            break;
-                        }
-                    }
-                }
-                if ok && !out.is_empty() {
-                    return Ok(out);
-                }
-            }
-            }
-        }
-
-        // 来源 3: 逐 tile 元素截图 (最后兜底)
-        let sel = if frame.locator(".task-image .image").count().await.unwrap_or(0) > 0 {
-            ".task-image .image"
-        } else {
-            ".task-image"
-        };
-        let n = frame.locator(sel).count().await.unwrap_or(0);
-        if n > 0 {
-            let mut out = Vec::new();
-            for i in 0..n {
-                if let Ok(bytes) = frame.locator(sel).nth(i as i32).screenshot(None).await {
-                    out.push((format!("shot-{i}"), bytes));
-                }
-            }
-            if !out.is_empty() {
-                return Ok(out);
-            }
-        }
-    }
-    Err("tile images unavailable (tasklist/css/screenshot 全失败)".into())
-}
-
-/// 处理一轮挑战: 路由题型 → 取图 → 分类 → 点 tile → 提交。
-/// 拖拽题走 drag::solve (canvas CV + 人类化拖拽), 网格题走 CLIP 分类。
 /// VLM 截图区域缓存 (拖拽归一化坐标 → 页面坐标换算用)
 static VLM_REGION: Mutex<Option<[f64; 4]>> = Mutex::new(None);
 
@@ -1523,179 +1411,16 @@ async fn solve_challenge_round(page: &playwright_rs::Page, data: &Value) -> Resu
         }
     }
     if prompt.is_empty() {
-        // 加密响应轮次: prompt 拿不到, 画面可见 — 默认热食语义组 (最常见题型),
-        // 置信度低会走 refresh/多轮, 不至于完全躺平
-        println!("[vision] prompt 未知 (加密轮次), 默认 hot_food 语义组");
-        prompt = "Select items safe for a hot oven".to_string();
+        // 加密轮 DOM+OCR 都拿不到文字: 整图扔 VLM 自读题面 (截图切图路径含画面顶部提示条)
+        println!("[vision] prompt 未知 (加密轮), VLM 自读截图");
+        prompt = "Read the instruction text at the top of the challenge image and select the matching tiles".to_string();
     }
-    let type_key = match super::vision::route_type(&prompt) {
-        Some(k) => k,
-        None => {
-            // 题型表未覆盖的新题 (如 "Choose 2 arrows outliers"/circuit-completion) —
-            // 回落 VLM 直出 (overlay G1-G9 + adaptive grid/point/drag)。此前这些题
-            // 100% unsupported→refresh 空转烧额度; VLM 兜底严格更优 (错则等同现状)。
-            if let Some(cfg) = super::vlm::config() {
-                println!("[vision] route_type 未命中 → VLM 兜底 (prompt={prompt:?})");
-                match inner_vlm_solve(page, data, &prompt, &cfg).await {
-                    Ok(()) => return Ok(()),
-                    Err(e) => println!("[vision] VLM 兜底失败: {e}"),
-                }
-            }
-            return Err(format!("unsupported prompt: {prompt}"));
-        }
-    };
-    println!("[vision] 路由题型: {type_key} (prompt={prompt:?})");
-    let spec = super::vision::spec_of(type_key).ok_or("spec missing")?;
-
-    let ua = page
-        .evaluate::<Value, String>("navigator.userAgent", None)
-        .await
-        .unwrap_or_else(|_| "Mozilla/5.0".into());
-    let tiles = fetch_tile_images(page, data, &ua).await?;
-    println!("[vision] tile 图就绪 {} 张 (来源={})", tiles.len(), tiles.first().map(|(n, _)| n.clone()).unwrap_or_default());
-    let embeds = super::vision::embed_images(&tiles)?;
-    let scores = super::vision::classify(type_key, &embeds)?;
-    for (i, s) in scores.iter().enumerate().take(9) {
-        println!("[vision] tile{i}: pos={:.3} neg={:.3} margin={:.3}", s.positive_score, s.negative_score, s.margin);
+    // VLM 直出 — CLIP ONNX 本地链移除后唯一视觉求解器 (proot ARM 上 ORT CPU EP 退化, 68 轮 0 成功):
+    // 全部题型统一走 inner_vlm_solve (overlay G1-G9 + adaptive grid/point/drag)
+    if let Some(cfg) = super::vlm::config() {
+        return inner_vlm_solve(page, data, &prompt, &cfg).await;
     }
-    let sets = super::vision::build_click_sets(&scores, spec.singular, spec.threshold);
-    let Some(set) = sets.first() else {
-        return Err("no click set generated".into());
-    };
-    println!("[vision] 点击集1: {set:?} (共{}套候选)", sets.len());
-    click_tiles_and_submit(page, &set).await
-}
-
-/// 截图模式取 tile — 嗅探器被封 (加密响应) 时的兜底取图:
-/// challenge iframe 在主 DOM 的 light DOM (实测), 拿 bounding rect →
-/// Page::screenshot 全页 PNG → 裁 iframe 区域 → 按标准网格布局切 3x3。
-/// 坐标系与路线 B (物理点击) 完全一致。
-async fn capture_challenge_tiles(
-    page: &playwright_rs::Page,
-) -> Result<(Vec<(String, Vec<u8>)>, Option<[f64; 5]>), String> {
-    let js = r#"(() => {
-        const fs = [...document.querySelectorAll('iframe')].filter(f => {
-            if (!(f.src||'').includes('hcaptcha')) return false;
-            const r = f.getBoundingClientRect();
-            // challenge iframe 高度 >400; checkbox 只有 ~74 高
-            return r.width > 250 && r.height > 400;
-        });
-        if (!fs.length) return null;
-        let best = fs[0];
-        for (const f of fs) { if (f.getBoundingClientRect().width > best.getBoundingClientRect().width) best = f; }
-        const r = best.getBoundingClientRect();
-        return JSON.stringify([r.x + (window.scrollX||0), r.y + (window.scrollY||0), r.width, r.height]);
-    })()"#;
-    let v = page
-        .evaluate::<Value, Value>(js, None)
-        .await
-        .map_err(|e| format!("iframe rect: {e}"))?;
-    let s = v.as_str().ok_or("challenge iframe 未找到 (截图模式)")?;
-    let arr: Vec<f64> = serde_json::from_str(s).map_err(|e| format!("rect 解析: {e}"))?;
-    if arr.len() != 4 {
-        return Err("rect 数据不完整".into());
-    }
-    let (rx, ry, rw, rh) = (arr[0], arr[1], arr[2], arr[3]);
-
-    // 慢线路实测: 截图常拍在 tile 未加载完时 — 网格式灰占位块 (亮度恒 128, 03:14 样张 8/9 灰),
-    // 检测器拿空图必失败, VLM 拿灰图必乱答。tile 区占位符占比过高就等 1.5s 重拍 (最多 5 次)。
-    let (mut cpx, mut cw, mut ch) = (Vec::new(), 0usize, 0usize);
-    let mut shot = 0u32;
-    loop {
-        shot += 1;
-        let png = page
-            .screenshot(None)
-            .await
-            .map_err(|e| format!("全页截图: {e}"))?;
-        let (px, pw, ph) = super::drag::decode_png(&png)?;
-        if shot == 1 {
-            println!("[vision] 截图模式: 页面{pw}x{ph} iframe=({rx:.0},{ry:.0} {rw:.0}x{rh:.0})");
-        }
-        let img = image::RgbImage::from_raw(pw as u32, ph as u32, px).ok_or("页面图重建失败")?;
-        // 裁 iframe 区域 (检测与切图都在此坐标系)
-        let crop = image::imageops::crop_imm(
-            &img,
-            rx.clamp(0.0, pw as f64 - 1.0) as u32,
-            ry.clamp(0.0, ph as f64 - 1.0) as u32,
-            rw.min(pw as f64 - rx.max(0.0)) as u32,
-            rh.min(ph as f64 - ry.max(0.0)) as u32,
-        )
-        .to_image();
-        cw = crop.width() as usize;
-        ch = crop.height() as usize;
-        cpx = crop.into_raw();
-        // 占位判定: 底部 45%~90% 带 (tile 区, 避开底部彩条按钮) 中 |亮度-128|<=2 的占比
-        let (y0, y1) = (ch * 45 / 100, ch * 90 / 100);
-        let (mut total, mut gray) = (0u64, 0u64);
-        for y in y0..y1.max(y0) {
-            for x in 0..cw {
-                let i = (y * cw + x) * 3;
-                if i + 2 >= cpx.len() {
-                    break;
-                }
-                let v = (cpx[i] as u16 + cpx[i + 1] as u16 + cpx[i + 2] as u16) / 3;
-                total += 1;
-                if (v as i32 - 128).abs() <= 2 {
-                    gray += 1;
-                }
-            }
-        }
-        let pct = if total > 0 { gray * 100 / total } else { 100 };
-        if pct < 78 || shot >= 5 {
-            println!("[vision] shot#{shot} tile 区灰占位 {pct}%");
-            break;
-        }
-        println!("[vision] tile 未加载完 (灰占位 {pct}%), 等 1.5s 重拍");
-        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-    }
-
-    // 自动网格检测 (实测 tile 位置), 失败退回常量猜测
-    let (gx, gy, gt, measured) = match super::drag::detect_grid_3x3(&cpx, cw, ch) {
-        Some((gx, gy, gt)) => {
-            println!("[vision] 网格实测: 起点=({gx:.0},{gy:.0}) tile={gt:.0}px");
-            (gx, gy, gt, true)
-        }
-        None => {
-            let g = (rw - 40.0) / 3.0;
-            println!("[vision] 网格检测失败, 常量回退 pad=20 top=90 tile={g:.0}");
-            (20.0, 90.0, g, false)
-        }
-    };
-
-    // debug: 每进程存一次 iframe 裁剪原图 + 一张切图, 供人工校准
-    if !DEBUG_SAVED.swap(true, Ordering::Relaxed) {
-        let dir = std::path::Path::new("data/debug");
-        let _ = std::fs::create_dir_all(dir);
-        if let Some(im) = image::RgbImage::from_raw(cw as u32, ch as u32, cpx.clone()) {
-            let _ = im.save(dir.join("iframe_crop.png"));
-            println!("[vision] debug 图已存: data/debug/iframe_crop.png ({}x{})", cw, ch);
-        }
-    }
-    // 只有实测网格才可进 LAST_GRID: 常量回退曾被当作"复用实测网格"跨轮缓存, 永远点同一组错格
-    let grid = if measured { Some([rx, ry, gx, gy, gt]) } else { None };
-
-    let crop_img = image::RgbImage::from_raw(cw as u32, ch as u32, cpx).ok_or("裁剪重建失败")?;
-    let mut out = Vec::new();
-    for idx in 0..9usize {
-        let col = (idx % 3) as f64;
-        let row = (idx / 3) as f64;
-        let x0 = (gx + col * gt).clamp(0.0, cw as f64 - 1.0) as u32;
-        let y0 = (gy + row * gt).clamp(0.0, ch as f64 - 1.0) as u32;
-        let tw = gt.min(cw as f64 - x0 as f64) as u32;
-        let th = gt.min(ch as f64 - y0 as f64) as u32;
-        if tw < 10 || th < 10 {
-            continue;
-        }
-        let sub = image::imageops::crop_imm(&crop_img, x0, y0, tw, th).to_image();
-        let mut buf = std::io::Cursor::new(Vec::new());
-        if sub.write_to(&mut buf, image::ImageFormat::Png).is_ok() {
-            out.push((format!("shot-{idx}"), buf.into_inner()));
-        }
-    }
-    if out.is_empty() {
-        return Err("截图模式切图失败".into());
-    }
-    Ok((out, grid))
+    Err(format!("VLM 未配置端点, 无法求解 (prompt={prompt:?})"))
 }
 
 /// 点击 tile + 提交 — 两级路线:
@@ -2303,11 +2028,10 @@ async fn refresh_challenge(page: &playwright_rs::Page) -> bool {
     false
 }
 
-/// onnx 模式: 本地 CLIP 视觉求解 — 全离线。
-/// checkbox 由现有基建点过; 挑战出现后嗅探 getcaptcha → 分类 → 点击循环。
-async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<String, String> {
-    super::vision::ensure_engine()?;
-    println!("[vision] 引擎就绪, 挂 getcaptcha 嗅探器");
+/// vlm 模式: 自托管 VLM 视觉求解 (题库精确匹配/拖拽 CV 本地链路优先)。
+/// checkbox 由现有基建点过; 挑战出现后嗅探 getcaptcha → 求解 → 点击循环。
+async fn solve_vlm_local(page: &playwright_rs::Page, timeout_secs: u64) -> Result<String, String> {
+    println!("[vision] 挂 getcaptcha 嗅探器");
     watch_getcaptcha(page).await;
     // hCaptcha 资源加载追踪 — 判断 widget 不渲染是脚本未加载还是初始化失败
     let _ = page
@@ -2418,8 +2142,7 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                         }
                     }
                 }
-                // 加密响应轮次: 槽空但挑战画面存在 → 截图模式直接分类
-                // (prompt 未知, 先用最常见的热食语义组; 置信度低会走 refresh 换题)
+                // 加密响应轮次: 槽空但挑战画面存在 → 标准链路 (DOM/OCR 恢复 prompt → 题库/VLM)
                 if checkbox_ticks % 3 == 0 {
                     let challenge_visible = page
                         .evaluate::<Value, Value>(
@@ -2526,7 +2249,7 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
-    Err("onnx 求解超时".into())
+    Err("vlm 求解超时".into())
 }
 
 /// 重置上次注入 (对齐原版 _reset_hcaptcha_widget)。

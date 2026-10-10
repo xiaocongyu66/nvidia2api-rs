@@ -6,7 +6,6 @@ pub mod drag;
 pub mod email;
 pub mod feature_lib;
 pub mod flow;
-pub mod vision;
 pub mod vlm;
 
 use serde_json::{json, Value};
@@ -150,7 +149,8 @@ fn to_flow_config(cfg: &RegConfig) -> flow::FlowConfig {
         mo_api_key: cfg.mo_api_key.clone(),
         mo_domain: cfg.mo_domain.clone(),
         solver: captcha::SolverConfig {
-            mode: cfg.captcha_mode.clone(),
+            // 旧 DB 存量 "onnx" (CLIP 本地链已删) → 归一化为 vlm
+            mode: if cfg.captcha_mode == "onnx" { "vlm".into() } else { cfg.captcha_mode.clone() },
             yescaptcha_key: cfg.yescaptcha_key.clone(),
             yescaptcha_url: "https://api.yescaptcha.com".into(),
             captcharun_token: cfg.captcharun_token.clone(),
@@ -224,7 +224,7 @@ pub fn start(count: u32) -> Result<(), String> {
     match cfg.captcha_mode.as_str() {
         "yescaptcha" if cfg.yescaptcha_key.is_empty() => return Err("yescaptcha_key 未配置".into()),
         "captcharun" if cfg.captcharun_token.is_empty() => return Err("captcharun_token 未配置".into()),
-        m if m != "yescaptcha" && m != "captcharun" && m != "local" && m != "sidecar" && m != "onnx" => return Err(format!("不支持的验证码模式: {m} (yescaptcha/captcharun/local/sidecar/onnx)")),
+        m if m != "yescaptcha" && m != "captcharun" && m != "local" && m != "sidecar" && m != "vlm" && m != "onnx" /* 存量别名→vlm */ => return Err(format!("不支持的验证码模式: {m} (vlm/sidecar/local/yescaptcha/captcharun)")),
         _ => {}
     }
     {

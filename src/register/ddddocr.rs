@@ -1,10 +1,18 @@
 //! ddddocr 移植 (sml2h3/ddddocr): CRNN OCR 本地推理 — 加密轮 prompt 解密。
 //! 模型 common_old.onnx 13.6MB (CRNN, 输入 [1,1,64,W] 动态宽) + charset 8210 字符。
 //! 预处理: 灰度 → 高 64 等比缩宽 → /255; 解码: argmax → 去连续重复 → 跳 index 0 (blank)。
+//! 兼管 ORT 动态库落盘引导 (CLIP 本地视觉链移除后 ort 的唯一消费者)。
 
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
+
+/// ORT 引擎动态库 (load-dynamic, 按架构内嵌)
+#[cfg(target_arch = "aarch64")]
+static ORT_DYLIB_BYTES: &[u8] = include_bytes!("../../model/lib/libonnxruntime-arm64.so");
+#[cfg(target_arch = "x86_64")]
+static ORT_DYLIB_BYTES: &[u8] = include_bytes!("../../model/lib/libonnxruntime-amd64.so");
 
 const OCR_MODEL_BYTES: &[u8] = include_bytes!("../../model/ocr_common_old.onnx");
 const OCR_CHARSET_JSON: &str = include_str!("../../model/ocr_charset.json");
@@ -16,13 +24,30 @@ struct OcrEngine {
 
 static OCR: OnceLock<OcrEngine> = OnceLock::new();
 
+fn models_dir() -> PathBuf {
+    crate::storage::data_dir().join("models")
+}
+
+/// ORT 动态库落盘 + ORT_DYLIB_PATH 指向 (load-dynamic 在首次 ort API 调用前读取)。幂等。
+fn ensure_dylib() -> Result<PathBuf, String> {
+    let dir = models_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir models: {e}"))?;
+    let dylib_path = dir.join("libonnxruntime.so");
+    if !dylib_path.exists() {
+        std::fs::write(&dylib_path, ORT_DYLIB_BYTES).map_err(|e| format!("write dylib: {e}"))?;
+    }
+    if std::env::var("ORT_DYLIB_PATH").map(|v| v.is_empty()).unwrap_or(true) {
+        std::env::set_var("ORT_DYLIB_PATH", &dylib_path);
+    }
+    Ok(dir)
+}
+
 /// OCR 引擎就绪 (落盘模型 + 建 session)。幂等。
 pub fn ensure_ocr() -> Result<(), String> {
     if OCR.get().is_some() {
         return Ok(());
     }
-    super::vision::ensure_engine()?; // 复用 dylib 落盘+ORT_DYLIB_PATH 设置
-    let dir = super::vision::models_dir();
+    let dir = ensure_dylib()?;
     let model_path = dir.join("ocr-common-old.onnx");
     if !model_path.exists() {
         std::fs::write(&model_path, OCR_MODEL_BYTES)
