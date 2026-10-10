@@ -585,9 +585,9 @@ pub async fn register_one(
         }
         Err(e) => {
             log(&logf, &format!("[✗] {email}: {e}"));
-            // 注册失败计入节点冷却统计, 连败自动轮换下一节点
+            // 注册失败计入节点统计: 限流类单败即冷却, 其余连败满 2 次才冷却
             if let Some(ref pa) = used_proxy {
-                crate::proxy_pool::mark_proxy_fail(pa);
+                crate::proxy_pool::mark_proxy_fail(pa, &e.to_string());
             }
             Err(e)
         }

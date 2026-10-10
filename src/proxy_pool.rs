@@ -111,19 +111,23 @@ pub fn mark_proxy_success(proxy_arg: &str) {
     );
 }
 
-/// 注册批次节点失败: 记入统计; 连败 >=2 才冷却 30min
-/// (弹窗超时/验证码类失败与 IP 无关, 单败就冷却会白白抽干节点池)
-pub fn mark_proxy_fail(proxy_arg: &str) {
+/// 注册批次节点失败: 记入统计。真·IP 限流类 (错误含 "限流") 单败即冷却 30min;
+/// 弹窗超时/验证码类与 IP 无关, 连败 >=2 才冷却 (单败即冷却会白白抽干节点池)
+pub fn mark_proxy_fail(proxy_arg: &str, reason: &str) {
     let Some(proxy_id) = proxy_id_of(proxy_arg) else { return };
+    let hard = reason.contains("限流") || reason.contains("quota");
     // 单一 db() guard — std Mutex 不可重入, 再调 db() 即自死锁
     let _ = db().execute(
         "UPDATE proxy SET failure_count = failure_count + 1, consecutive_failures = consecutive_failures + 1, \
-         status = CASE WHEN consecutive_failures + 1 >= 2 THEN 'cooling' ELSE status END, \
-         cooldown_until = CASE WHEN consecutive_failures + 1 >= 2 THEN datetime('now', '+1800 seconds') ELSE cooldown_until END \
+         status = CASE WHEN ?2 THEN 'cooling' ELSE status END, \
+         cooldown_until = CASE WHEN ?2 = 1 OR consecutive_failures + 1 >= 2 THEN datetime('now', '+1800 seconds') ELSE cooldown_until END \
          WHERE id = ?1",
-        rusqlite::params![proxy_id],
+        rusqlite::params![proxy_id, hard],
     );
-    eprintln!("[proxy] 节点 {proxy_id} 注册失败 (连败满 2 次才冷却 30min)");
+    eprintln!(
+        "[proxy] 节点 {proxy_id} 注册失败 ({}; 连败满 2 次或限流类才冷却 30min)",
+        if hard { "IP限流" } else { "非IP类" }
+    );
 }
 
 /// 服务启动预热: 拉起所有 enabled 隧道的本地 mixed 监听
