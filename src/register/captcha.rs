@@ -1559,25 +1559,57 @@ async fn capture_challenge_tiles(
     }
     let (rx, ry, rw, rh) = (arr[0], arr[1], arr[2], arr[3]);
 
-    let png = page
-        .screenshot(None)
-        .await
-        .map_err(|e| format!("全页截图: {e}"))?;
-    let (px, pw, ph) = super::drag::decode_png(&png)?;
-    println!("[vision] 截图模式: 页面{pw}x{ph} iframe=({rx:.0},{ry:.0} {rw:.0}x{rh:.0})");
-    let img = image::RgbImage::from_raw(pw as u32, ph as u32, px).ok_or("页面图重建失败")?;
-
-    // 裁 iframe 区域 (检测与切图都在此坐标系)
-    let crop = image::imageops::crop_imm(
-        &img,
-        rx.clamp(0.0, pw as f64 - 1.0) as u32,
-        ry.clamp(0.0, ph as f64 - 1.0) as u32,
-        rw.min(pw as f64 - rx.max(0.0)) as u32,
-        rh.min(ph as f64 - ry.max(0.0)) as u32,
-    )
-    .to_image();
-    let (cw, ch) = (crop.width() as usize, crop.height() as usize);
-    let cpx = crop.into_raw();
+    // 慢线路实测: 截图常拍在 tile 未加载完时 — 网格式灰占位块 (亮度恒 128, 03:14 样张 8/9 灰),
+    // 检测器拿空图必失败, VLM 拿灰图必乱答。tile 区占位符占比过高就等 1.5s 重拍 (最多 5 次)。
+    let (mut cpx, mut cw, mut ch) = (Vec::new(), 0usize, 0usize);
+    let mut shot = 0u32;
+    loop {
+        shot += 1;
+        let png = page
+            .screenshot(None)
+            .await
+            .map_err(|e| format!("全页截图: {e}"))?;
+        let (px, pw, ph) = super::drag::decode_png(&png)?;
+        if shot == 1 {
+            println!("[vision] 截图模式: 页面{pw}x{ph} iframe=({rx:.0},{ry:.0} {rw:.0}x{rh:.0})");
+        }
+        let img = image::RgbImage::from_raw(pw as u32, ph as u32, px).ok_or("页面图重建失败")?;
+        // 裁 iframe 区域 (检测与切图都在此坐标系)
+        let crop = image::imageops::crop_imm(
+            &img,
+            rx.clamp(0.0, pw as f64 - 1.0) as u32,
+            ry.clamp(0.0, ph as f64 - 1.0) as u32,
+            rw.min(pw as f64 - rx.max(0.0)) as u32,
+            rh.min(ph as f64 - ry.max(0.0)) as u32,
+        )
+        .to_image();
+        cw = crop.width() as usize;
+        ch = crop.height() as usize;
+        cpx = crop.into_raw();
+        // 占位判定: 底部 45%~90% 带 (tile 区, 避开底部彩条按钮) 中 |亮度-128|<=2 的占比
+        let (y0, y1) = (ch * 45 / 100, ch * 90 / 100);
+        let (mut total, mut gray) = (0u64, 0u64);
+        for y in y0..y1.max(y0) {
+            for x in 0..cw {
+                let i = (y * cw + x) * 3;
+                if i + 2 >= cpx.len() {
+                    break;
+                }
+                let v = (cpx[i] as u16 + cpx[i + 1] as u16 + cpx[i + 2] as u16) / 3;
+                total += 1;
+                if (v as i32 - 128).abs() <= 2 {
+                    gray += 1;
+                }
+            }
+        }
+        let pct = if total > 0 { gray * 100 / total } else { 100 };
+        if pct < 78 || shot >= 5 {
+            println!("[vision] shot#{shot} tile 区灰占位 {pct}%");
+            break;
+        }
+        println!("[vision] tile 未加载完 (灰占位 {pct}%), 等 1.5s 重拍");
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    }
 
     // 自动网格检测 (实测 tile 位置), 失败退回常量猜测
     let (gx, gy, gt, measured) = match super::drag::detect_grid_3x3(&cpx, cw, ch) {

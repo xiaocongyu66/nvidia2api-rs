@@ -332,7 +332,7 @@ pub async fn register_one(
                 break;
             }
             // 慢线路实测: Next 点击丢失后表单卡回 email 页, 只等不自救必超时 — 25s 未前进则重发
-            if !resent && t5.elapsed().map(|e| e.as_secs() >= 25).unwrap_or(false) {
+            if !resent && now() >= t5 + std::time::Duration::from_secs(25) {
                 resent = true;
                 if form_frame.locator("input[name=\"email\"]").first().count().await.unwrap_or(0) > 0 {
                     log(&logf, "[5] 25s 表单未前进, 重发 Next…");
