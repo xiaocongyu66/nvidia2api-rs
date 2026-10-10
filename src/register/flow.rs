@@ -768,7 +768,7 @@ async fn create_org(page: &playwright_rs::Page, org_name: &str) -> bool {
         static DUMPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !DUMPED.swap(true, std::sync::atomic::Ordering::Relaxed) {
             let dump = page
-                .evaluate::<Value>(
+                .evaluate::<Value, Value>(
                     "(() => JSON.stringify({inputs:[...document.querySelectorAll('input')].slice(0,8).map(i=>i.type+':'+(i.id||i.name||i.placeholder||'?')),btns:[...document.querySelectorAll('button,[role=button]')].slice(0,10).map(b=>(b.innerText||b.value||b.id||'').trim().slice(0,40))}))()",
                     None,
                 )
