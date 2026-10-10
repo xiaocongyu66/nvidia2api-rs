@@ -736,21 +736,58 @@ async fn find_challenge_frame_wait(
 ) -> Option<playwright_rs::protocol::Frame> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
     loop {
-        // 主路径: page.frames() 快照
         if let Ok(frames) = page.frames().await {
+            // hcaptcha 有多个 newassets frame (checkbox 包装条 / 挑战出图区), URL 域匹配会抓到
+            // 包装条 (实测 anchor:3 其余全 0, task-image count=0) — 按内容打分择优
+            let mut cands: Vec<playwright_rs::protocol::Frame> = Vec::new();
             for f in &frames {
                 let u = f.url();
-                if u.contains("frame=challenge") || u.contains("newassets.hcaptcha.com") {
-                    return Some(f.clone());
+                if u.contains("frame=challenge") || u.contains("newassets.hcaptcha.com") || u.contains("hcaptcha.com") {
+                    cands.push(f.clone());
                 }
             }
             // 备用路径: 主 frame 的 child_frames (frame 树的另一条视图)
             if let Some(main) = frames.iter().find(|f| f.parent_frame().is_none()) {
                 for cf in main.child_frames() {
                     let u = cf.url();
-                    if u.contains("frame=challenge") || u.contains("newassets.hcaptcha.com") {
-                        return Some(cf);
+                    if (u.contains("frame=challenge") || u.contains("newassets.hcaptcha.com") || u.contains("hcaptcha.com"))
+                        && !cands.iter().any(|c| c.url() == u)
+                    {
+                        cands.push(cf);
                     }
+                }
+            }
+            // score = task-image*100 + 大img数 + canvas*50
+            let mut best: Option<(i64, playwright_rs::protocol::Frame)> = None;
+            let mut probe_dump = String::new();
+            for f in &cands {
+                let score = f
+                    .evaluate::<Value>(
+                        "(() => { const q=s=>document.querySelectorAll(s).length; const big=[...document.querySelectorAll('img')].filter(i=>i.offsetWidth>40&&i.offsetHeight>40).length; return q('.task-image')*100 + big + q('canvas')*50; })()",
+                        None,
+                    )
+                    .await
+                    .ok()
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                probe_dump.push_str(&format!(" {}|score={}", f.url().chars().take(60).collect::<String>(), score));
+                if score > 0 && best.as_ref().map(|(b, _)| score > *b).unwrap_or(true) {
+                    best = Some((score, f.clone()));
+                }
+            }
+            if let Some((_, f)) = best {
+                return Some(f);
+            }
+            if !cands.is_empty() {
+                // 全零 = 出图区不在可 evaluate 的 frame (深嵌/背景图渲染), 打地形供诊断
+                println!("[vision] challenge frame 全零探测:{probe_dump}");
+                let pick = cands
+                    .iter()
+                    .find(|f| f.url().contains("frame=challenge"))
+                    .cloned()
+                    .or_else(|| cands.first().cloned());
+                if pick.is_some() {
+                    return pick;
                 }
             }
         }
