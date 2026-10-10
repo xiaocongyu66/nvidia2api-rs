@@ -322,10 +322,12 @@ pub async fn register_one(
         // [5] 填密码 — 两坑: ①风控下表单 30s 才渲染(实测), 等 75s ②邮箱提交后整页跳转
         //      login.nvgs.nvidia.com, 密码表单在新主页面, 必须跨 frame 重找(旧 form_frame 已消亡)
         log(&logf, "[5] 填写密码…");
-        let deadline = now() + std::time::Duration::from_secs(75);
+        // 慢线路 (12KB/s) SPA bundle 可能 80-160s 才跑完, 75s 窗口实测不够 (BR 轮 body 全空)
+        let deadline = now() + std::time::Duration::from_secs(150);
         let t5 = now();
         let mut pw_frame: Option<playwright_rs::protocol::Frame> = None;
         let mut resent = false;
+        let mut reloaded = false;
         while now() < deadline {
             // 登录页多变体 (实测 BR 出口轮: login.nvgs.nvidia.com 渲染出的密码框 id 不是 #registration_password)
             // — 通用 input[type=password] 兜底
@@ -344,6 +346,30 @@ pub async fn register_one(
                     let nb = form_frame.get_by_role(AriaRole::Button, Some(GetByRoleOptions::default().name("Next")));
                     if captcha::human_click_locator(&page, &nb.first()).await.is_err() {
                         let _ = nb.first().click(None).await;
+                    }
+                }
+            }
+            // 80s 仍无密码框 → SPA 资源大概率没跑完 (body 空, 无 input) — 重拉登录文档一次。
+            // 登录页若在顶层 reload 即保留 URL key 参数; 若在 iframe 则对 frame 自身 goto (顶层 reload 会丢 OTP 状态)
+            if !reloaded && now() >= t5 + std::time::Duration::from_secs(80) {
+                reloaded = true;
+                let lu = page.url();
+                if lu.contains("login.") {
+                    log(&logf, "[5] 80s 未出密码框, reload 登录页 (顶层)…");
+                    let _ = page.reload(None::<GotoOptions>).await;
+                } else if let Ok(fs) = page.frames().await {
+                    let mut done = false;
+                    for f in fs.iter() {
+                        let u = f.url();
+                        if u.contains("login.") {
+                            log(&logf, &format!("[5] 80s 未出密码框, iframe 重拉登录页…"));
+                            let _ = f.goto(&u, None).await;
+                            done = true;
+                            break;
+                        }
+                    }
+                    if !done {
+                        log(&logf, "[5] 80s 未出密码框, 未见登录页 frame, 干等…");
                     }
                 }
             }
