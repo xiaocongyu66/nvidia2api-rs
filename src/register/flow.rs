@@ -764,6 +764,20 @@ async fn get_org_name(page: &playwright_rs::Page) -> Option<String> {
 async fn create_org(page: &playwright_rs::Page, org_name: &str) -> bool {
     let text_input = page.locator("input[type=\"text\"]").first();
     if text_input.count().await.unwrap_or(0) == 0 {
+        // 变体诊断: 页面无 text input 时 dump 实际字段与按钮, 别静默空转到 240s 超时
+        static DUMPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !DUMPED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            let dump = page
+                .evaluate::<Value>(
+                    "(() => JSON.stringify({inputs:[...document.querySelectorAll('input')].slice(0,8).map(i=>i.type+':'+(i.id||i.name||i.placeholder||'?')),btns:[...document.querySelectorAll('button,[role=button]')].slice(0,10).map(b=>(b.innerText||b.value||b.id||'').trim().slice(0,40))}))()",
+                    None,
+                )
+                .await
+                .ok()
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_default();
+            println!("[8] create_org 无 text input, 页面地形: {dump}");
+        }
         return false;
     }
     let _ = text_input.click(None).await;
@@ -779,6 +793,16 @@ async fn create_org(page: &playwright_rs::Page, org_name: &str) -> bool {
             }
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    // 按钮文案变体兜底: 任意含 Create/创建/Continue/继续 的启用按钮
+    let alt = page
+        .locator("button:has-text(\"Create\"), button:has-text(\"创建\"), button:has-text(\"Continue\"), button:has-text(\"继续\"), [role=\"button\"]:has-text(\"Create\")")
+        .first();
+    if alt.count().await.unwrap_or(0) > 0 && alt.is_enabled().await.unwrap_or(false) {
+        if alt.click(None).await.is_ok() {
+            println!("[8] create_org 走按钮文案兜底点击成功");
+            return true;
+        }
     }
     false
 }
