@@ -327,7 +327,12 @@ pub async fn register_one(
         let mut pw_frame: Option<playwright_rs::protocol::Frame> = None;
         let mut resent = false;
         while now() < deadline {
-            if let Some(f) = find_frame_with(&page, "#registration_password").await {
+            // 登录页多变体 (实测 BR 出口轮: login.nvgs.nvidia.com 渲染出的密码框 id 不是 #registration_password)
+            // — 通用 input[type=password] 兜底
+            if let Some(f) = find_frame_with(&page, "#registration_password")
+                .await
+                .or(find_frame_with(&page, "input[type=\"password\"]").await)
+            {
                 pw_frame = Some(f);
                 break;
             }
@@ -358,19 +363,39 @@ pub async fn register_one(
                         .ok()
                         .and_then(|v| v.as_str().map(String::from))
                         .unwrap_or_default();
-                    log(&logf, &format!("[5-diag] frame {url} | {text}"));
+                    let inputs: String = f
+                        .evaluate::<Value>(
+                            "(() => JSON.stringify([...document.querySelectorAll('input')].slice(0,6).map(i => i.id || i.name || i.type)))()",
+                            None,
+                        )
+                        .await
+                        .ok()
+                        .and_then(|v| v.as_str().map(String::from))
+                        .unwrap_or_default();
+                    log(&logf, &format!("[5-diag] frame {url} | inputs={inputs} | {text}"));
                 }
             }
             return Err("password field never appeared".into());
         };
-        let pw_input = pw_frame.locator("#registration_password").first();
+        // 变体兜底: id 缺失的登录页用通用密码框选择器
+        let pw_input = if pw_frame.locator("#registration_password").count().await.unwrap_or(0) > 0 {
+            pw_frame.locator("#registration_password").first()
+        } else {
+            log(&logf, "[5] 非标准密码框变体 (无 #registration_password), 走通用选择器");
+            pw_frame.locator("input[type=\"password\"]").first()
+        };
         if captcha::human_click_locator(&page, &pw_input).await.is_err() {
             let _ = pw_input.click(None).await;
         }
         if captcha::human_type(&page, &password).await.is_err() {
             let _ = pw_input.fill(&password, None).await;
         }
-        let pw_confirm = pw_frame.locator("#registration_passwordConfirm").first();
+        let pw_confirm = if pw_frame.locator("#registration_passwordConfirm").count().await.unwrap_or(0) > 0 {
+            pw_frame.locator("#registration_passwordConfirm").first()
+        } else {
+            // 单密码框变体: 无确认框时 nth(1) 计数为 0, 后续点击/填值失败自然跳过
+            pw_frame.locator("input[type=\"password\"]").nth(1)
+        };
         if captcha::human_click_locator(&page, &pw_confirm).await.is_err() {
             let _ = pw_confirm.click(None).await;
         }
