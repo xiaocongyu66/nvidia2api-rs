@@ -65,11 +65,18 @@ pub fn chromium_proxy_arg() -> Option<String> {
         .into_iter()
         .filter(|p| p.enabled && p.cooldown_until.as_deref().map(|c| c <= now.as_str()).unwrap_or(true))
         .collect();
-    if candidates.is_empty() {
+    // 全在冷却时仍走代理轮换: 直连国内 IP 会撞 hCaptcha 配额墙 (日级限流), 比冷却节点更毒
+    let pool: Vec<Proxy> = if candidates.is_empty() {
+        println!("[proxy] 全部节点冷却中, 仍走代理轮换 (拒走直连)");
+        list_all().into_iter().filter(|p| p.enabled).collect()
+    } else {
+        candidates
+    };
+    if pool.is_empty() {
         return None;
     }
-    let idx = NEXT_PROXY.fetch_add(1, Ordering::Relaxed) % candidates.len();
-    let p = &candidates[idx];
+    let idx = NEXT_PROXY.fetch_add(1, Ordering::Relaxed) % pool.len();
+    let p = &pool[idx];
     if is_tunnel_protocol(&p.protocol) {
         if let Some(port) = tunnel_port_for(p) {
             return Some(format!("--proxy-server=socks5://127.0.0.1:{port}"));
@@ -84,29 +91,39 @@ pub fn chromium_proxy_arg() -> Option<String> {
     Some(format!("--proxy-server={}://{}{}:{}", p.protocol, auth, p.host, p.port))
 }
 
-/// 注册批次节点失败: 记入冷却统计, 连败到阈值自动切换下一节点
-pub fn mark_proxy_fail(proxy_arg: &str) {
-    // proxy_arg 形如 --proxy-server=socks5://127.0.0.1:PORT 或 host 型, 反查节点 id
+/// 从 chromium proxy_arg 反查节点 id。隧道端口规则与 tunnel_port_for 一致: 16000 + id
+/// (旧实现按 enabled 列表下标反查 — 停用节点后整体错位, 高 id 节点永远罚不到/罚错人)
+fn proxy_id_of(proxy_arg: &str) -> Option<i64> {
     let port = proxy_arg
-        .strip_prefix("--proxy-server=socks5://127.0.0.1:")
-        .and_then(|s| s.parse::<i64>().ok());
-    let Some(port) = port else { return };
-    let conn = db();
-    let ids: Vec<i64> = conn
-        .prepare("SELECT id FROM proxy WHERE enabled = 1")
-        .and_then(|mut s| s.query_map([], |r| r.get(0)).map(|i| i.flatten().collect()))
-        .unwrap_or_default();
-    // tunnel_port_for 的端口映射: 端口基数 16000 + 序号, id 序对应 list_all 顺序
-    if let Some(&proxy_id) = ids.get((port - 16001) as usize) {
-        // 注意: 复用上方 conn guard — std Mutex 不可重入, 再调 db() 即自死锁
-        let _ = conn.execute(
-            "UPDATE proxy SET failure_count = failure_count + 1, consecutive_failures = consecutive_failures + 1, \
-             status = CASE WHEN consecutive_failures + 1 >= 2 THEN 'cooling' ELSE status END, \
-             cooldown_until = datetime('now', '+1800 seconds') WHERE id = ?1",
-            rusqlite::params![proxy_id],
-        );
-        eprintln!("[proxy] 节点 {proxy_id} 记入冷却 30min (注册失败)");
-    }
+        .strip_prefix("--proxy-server=socks5://127.0.0.1:")?
+        .parse::<i64>()
+        .ok()?;
+    port.checked_sub(16000)
+}
+
+/// 注册成功: 清连败与冷却 (否则一次偶发页面故障会持续拖累该节点)
+pub fn mark_proxy_success(proxy_arg: &str) {
+    let Some(proxy_id) = proxy_id_of(proxy_arg) else { return };
+    let _ = db().execute(
+        "UPDATE proxy SET consecutive_failures = 0, cooldown_until = NULL, status = 'healthy', \
+         success_count = success_count + 1 WHERE id = ?1",
+        rusqlite::params![proxy_id],
+    );
+}
+
+/// 注册批次节点失败: 记入统计; 连败 >=2 才冷却 30min
+/// (弹窗超时/验证码类失败与 IP 无关, 单败就冷却会白白抽干节点池)
+pub fn mark_proxy_fail(proxy_arg: &str) {
+    let Some(proxy_id) = proxy_id_of(proxy_arg) else { return };
+    // 单一 db() guard — std Mutex 不可重入, 再调 db() 即自死锁
+    let _ = db().execute(
+        "UPDATE proxy SET failure_count = failure_count + 1, consecutive_failures = consecutive_failures + 1, \
+         status = CASE WHEN consecutive_failures + 1 >= 2 THEN 'cooling' ELSE status END, \
+         cooldown_until = CASE WHEN consecutive_failures + 1 >= 2 THEN datetime('now', '+1800 seconds') ELSE cooldown_until END \
+         WHERE id = ?1",
+        rusqlite::params![proxy_id],
+    );
+    eprintln!("[proxy] 节点 {proxy_id} 注册失败 (连败满 2 次才冷却 30min)");
 }
 
 /// 服务启动预热: 拉起所有 enabled 隧道的本地 mixed 监听

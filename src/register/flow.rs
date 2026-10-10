@@ -578,6 +578,9 @@ pub async fn register_one(
     match result {
         Ok(key) => {
             log(&logf, &format!("[✓] {email} → {}…", &key[..key.len().min(30)]));
+            if let Some(ref pa) = used_proxy {
+                crate::proxy_pool::mark_proxy_success(pa);
+            }
             Ok((email, key))
         }
         Err(e) => {
