@@ -647,9 +647,10 @@ async fn watch_getcaptcha(page: &playwright_rs::Page) {
             } else if resp.url().contains("getcaptcha") {
                 let st = resp.status();
                 println!("[vision] getcaptcha 响应捕获 status={st}");
-                // HTTP 429 硬限流: 冷却 180s, 期间 solve_onnx 快速放弃不再空烧
+                // HTTP 429 限流: Oracle 段实测为 ~60s 分钟级短窗 throttle → 冷却 90s
+                // (曾 180s: 比 solve 整体预算还长, 原地等待重试永远轮不到)
                 if st == 429 {
-                    mark_rate_limited(180_000);
+                    mark_rate_limited(90_000);
                 }
                 match resp.body().await {
                     Ok(raw) => {
@@ -2297,6 +2298,7 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
     let mut same_rounds = 0u32;
     let mut checkbox_ticks = 0u32;
     let mut fail_rounds = 0u32;
+    let mut rate_waits = 0u32;
 
     while tokio::time::Instant::now() < deadline {
         // 1. 已有 token 直接返回 (答对后 challenge 关闭, token 落 textarea)
@@ -2324,9 +2326,17 @@ async fn solve_onnx(page: &playwright_rs::Page, timeout_secs: u64) -> Result<Str
                     .unwrap_or(0))
                 / 1000;
             println!("[vision] 限流冷却中, 剩余 {remain}s (跳过点击/refresh)");
-            // 限流 + 从未拿到挑战 = 本轮不可能过, 快速放弃省掉整段超时
+            // 澳/巴/韩订阅出口全是 Oracle AS31898, hCaptcha 是对 ASN 的分钟级短窗节流 —
+            // 换节点仍是中毒段, 原地等过窗口再点 checkbox 才是正解; 两次等完仍被掐才放弃
             if GETCAPTCHA.lock().unwrap().is_none() {
-                return Err(format!("hcaptcha 限流冷却 (剩余{remain}s), 快速放弃"));
+                rate_waits += 1;
+                if rate_waits > 2 {
+                    return Err(format!("hcaptcha 限流冷却 (剩余{remain}s), 原地等待{}/2 后仍被掐, 放弃", rate_waits - 1));
+                }
+                let wait = remain.clamp(3, 100) as u64 + 2;
+                println!("[vision] 限流原地等待 {rate_waits}/2: {wait}s 后重点 checkbox…");
+                tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                continue;
             }
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             continue;
