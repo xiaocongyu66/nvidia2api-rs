@@ -111,30 +111,43 @@ pub async fn register_one(
     stop: Arc<AtomicBool>,
 ) -> Result<(String, String), String> {
     log(&logf, "[1] 创建临时邮箱…");
-    let inbox: Inbox = match cfg.email_provider.as_str() {
-        "moemail" => {
-            let mo = MoeMail {
-                api_url: cfg.mo_api_url.clone(),
-                api_key: cfg.mo_api_key.clone(),
-                domain: cfg.mo_domain.clone(),
-            };
-            mo.create_inbox(&format!("nv{}", super::rand_hex(8))).await?
-        }
-        "duckmail" => {
-            let dm = DuckMail {
-                api_url: cfg.duck_api_url.clone(),
-                domain: cfg.duck_domain.clone(),
-                api_key: cfg.duck_api_key.clone(),
-            };
-            dm.create_inbox(&format!("nv{}", super::rand_hex(8))).await?
-        }
-        _ => {
-            let cf = CloudflareTempEmail {
-                api_url: cfg.cf_api_url.clone(),
-                admin_auth: cfg.cf_admin_auth.clone(),
-                domain: cfg.cf_domain.clone(),
-            };
-            cf.create_inbox(&format!("nv{}", super::rand_hex(8))).await?
+    // 本机 TLS/网络抖动频繁, 第一步瞬时失败不该烧掉整轮 — 5s 后重试, 最多 3 次
+    let mut attempt = 0u32;
+    let inbox: Inbox = loop {
+        attempt += 1;
+        let r: Result<Inbox, String> = match cfg.email_provider.as_str() {
+            "moemail" => {
+                let mo = MoeMail {
+                    api_url: cfg.mo_api_url.clone(),
+                    api_key: cfg.mo_api_key.clone(),
+                    domain: cfg.mo_domain.clone(),
+                };
+                mo.create_inbox(&format!("nv{}", super::rand_hex(8))).await
+            }
+            "duckmail" => {
+                let dm = DuckMail {
+                    api_url: cfg.duck_api_url.clone(),
+                    domain: cfg.duck_domain.clone(),
+                    api_key: cfg.duck_api_key.clone(),
+                };
+                dm.create_inbox(&format!("nv{}", super::rand_hex(8))).await
+            }
+            _ => {
+                let cf = CloudflareTempEmail {
+                    api_url: cfg.cf_api_url.clone(),
+                    admin_auth: cfg.cf_admin_auth.clone(),
+                    domain: cfg.cf_domain.clone(),
+                };
+                cf.create_inbox(&format!("nv{}", super::rand_hex(8))).await
+            }
+        };
+        match r {
+            Ok(v) => break v,
+            Err(e) if attempt < 3 => {
+                log(&logf, &format!("[1] 创建邮箱失败 ({e}), 5s 后重试 {attempt}/2…"));
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+            Err(e) => return Err(e),
         }
     };
     let email = inbox.address.clone();
