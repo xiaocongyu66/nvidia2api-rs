@@ -253,8 +253,8 @@ pub async fn register_one(
                 .await;
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
-        // 等弹窗 (SSO iframe) 渲染: 跨 frame 找 email input
-        let deadline = now() + std::time::Duration::from_secs(20);
+        // 等弹窗 (SSO iframe) 渲染: 跨 frame 找 email input (慢代理线路页资源 12KB/s, 20s 不够)
+        let deadline = now() + std::time::Duration::from_secs(40);
         let mut form_frame: Option<playwright_rs::protocol::Frame> = None;
         while now() < deadline {
             if let Some(f) = find_frame_with(&page, "input[name=\"email\"]").await {
@@ -323,11 +323,24 @@ pub async fn register_one(
         //      login.nvgs.nvidia.com, 密码表单在新主页面, 必须跨 frame 重找(旧 form_frame 已消亡)
         log(&logf, "[5] 填写密码…");
         let deadline = now() + std::time::Duration::from_secs(75);
+        let t5 = now();
         let mut pw_frame: Option<playwright_rs::protocol::Frame> = None;
+        let mut resent = false;
         while now() < deadline {
             if let Some(f) = find_frame_with(&page, "#registration_password").await {
                 pw_frame = Some(f);
                 break;
+            }
+            // 慢线路实测: Next 点击丢失后表单卡回 email 页, 只等不自救必超时 — 25s 未前进则重发
+            if !resent && t5.elapsed().map(|e| e.as_secs() >= 25).unwrap_or(false) {
+                resent = true;
+                if form_frame.locator("input[name=\"email\"]").first().count().await.unwrap_or(0) > 0 {
+                    log(&logf, "[5] 25s 表单未前进, 重发 Next…");
+                    let nb = form_frame.get_by_role(AriaRole::Button, Some(GetByRoleOptions::default().name("Next")));
+                    if captcha::human_click_locator(&page, &nb.first()).await.is_err() {
+                        let _ = nb.first().click(None).await;
+                    }
+                }
             }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
