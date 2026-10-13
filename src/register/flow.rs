@@ -764,19 +764,30 @@ async fn get_org_name(page: &playwright_rs::Page) -> Option<String> {
 async fn create_org(page: &playwright_rs::Page, org_name: &str) -> bool {
     let text_input = page.locator("input[type=\"text\"]").first();
     if text_input.count().await.unwrap_or(0) == 0 {
-        // 变体诊断: 页面无 text input 时 dump 实际字段与按钮, 别静默空转到 240s 超时
+        // 变体诊断: 主 frame 无 input —— 实测地形完全空 {inputs:[],btns:[]},
+        // 嵌套 SPA 的内容常在子 iframe —— 遍历全部 frame 逐个探地形 + 截图
         static DUMPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !DUMPED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            let dump = page
-                .evaluate::<Value, Value>(
-                    "(() => JSON.stringify({inputs:[...document.querySelectorAll('input')].slice(0,8).map(i=>i.type+':'+(i.id||i.name||i.placeholder||'?')),btns:[...document.querySelectorAll('button,[role=button]')].slice(0,10).map(b=>(b.innerText||b.value||b.id||'').trim().slice(0,40))}))()",
-                    None,
-                )
-                .await
-                .ok()
-                .and_then(|v| v.as_str().map(String::from))
-                .unwrap_or_default();
-            println!("[8] create_org 无 text input, 页面地形: {dump}");
+            let frames = page.frames().await.unwrap_or_default();
+            println!("[8] create_org 主 frame 无 input, 共 {} 个 frame:", frames.len());
+            for f in &frames {
+                let info = f
+                    .evaluate::<Value>(
+                        "(() => JSON.stringify({url:location.href.slice(0,80),bodyLen:(document.body?document.body.innerText.length:0),inputs:[...document.querySelectorAll('input')].slice(0,6).map(i=>i.type+':'+(i.id||i.name||i.placeholder||'?')),btns:[...document.querySelectorAll('button,[role=button]')].slice(0,6).map(b=>(b.innerText||b.value||'').trim().slice(0,30))}))()",
+                        None,
+                    )
+                    .await
+                    .ok()
+                    .and_then(|v| v.as_str().map(String::from))
+                    .unwrap_or_else(|| "eval-failed".into());
+                println!("[8] frame: {info}");
+            }
+            if let Ok(bytes) = page.screenshot(None).await {
+                let p = std::path::Path::new("data/debug/create_org.png");
+                let _ = std::fs::create_dir_all(p.parent().unwrap());
+                let _ = std::fs::write(p, &bytes);
+                println!("[8] 组织页截图已存 data/debug/create_org.png ({}B)", bytes.len());
+            }
         }
         return false;
     }
