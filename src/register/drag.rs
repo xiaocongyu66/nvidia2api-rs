@@ -741,7 +741,65 @@ pub fn detect_grid_3x3(px: &[u8], w: usize, h: usize) -> Option<(f64, f64, f64)>
 // 填充密度 (area/bbox) 显著高于带衬线字母 → 用密度锚定目标。
 // ---------------------------------------------------------------------------
 
+/// 重度扭曲 letter-drag 变体 ("Drag the letter to the place where it fits") 的准星直解:
+/// 题面被细密条纹覆盖、字母不可辨认, hCaptcha 用蓝 + (起点) 与红 + (落点) 两个
+/// 十字准星标注位置 (2026-10-14 GLM 口述 + 其坐标版 x=0.31/0.90 与准星精确重合互证)。
+/// 亮色组件匹配在此变体下被条纹骗出伪 from (实测三次同错) — HSV 色检直出,
+/// 找不到准星再落回旧算法。
+fn try_crosshair_solve(px: &[u8], w: usize, h: usize) -> Option<DragSolution> {
+    let y_lo = (h as f32 * 0.16) as usize;
+    let y_hi = (h as f32 * 0.90) as usize;
+    let mut blue = vec![false; w * h];
+    let mut red = vec![false; w * h];
+    for y in y_lo..y_hi {
+        for x in 0..w {
+            let i = (y * w + x) * 3;
+            let (r, g, b) = (px[i] as f32, px[i + 1] as f32, px[i + 2] as f32);
+            let mx = r.max(g).max(b);
+            let mn = r.min(g).min(b);
+            let s = if mx > 0.0 { (mx - mn) / mx * 255.0 } else { 0.0 };
+            let hdeg = if mx == mn {
+                0.0
+            } else if mx == r {
+                let hd = 60.0 * ((g - b) / (mx - mn)) % 360.0;
+                if hd < 0.0 { hd + 360.0 } else { hd }
+            } else if mx == g {
+                60.0 * ((b - r) / (mx - mn)) + 120.0
+            } else {
+                60.0 * ((r - g) / (mx - mn)) + 240.0
+            };
+            // 准星蓝 ≈ #2196F3 (H≈207): 高饱和中亮蓝 — 与深蓝背景槽 (H 95-135) 分开
+            if (195.0..=225.0).contains(&hdeg) && s >= 90.0 && mx >= 120.0 {
+                blue[y * w + x] = true;
+            }
+            // 准星红 (H≈0/360)
+            if (hdeg <= 12.0 || hdeg >= 348.0) && s >= 110.0 && mx >= 110.0 {
+                red[y * w + x] = true;
+            }
+        }
+    }
+    // 小准星组件 (bbox ≤44px); 大色块/背景团一律排除
+    let pick = |mask: &[bool]| -> Option<(f64, f64)> {
+        connected_components(mask, w, h, 12)
+            .iter()
+            .filter(|c| c.w <= 44 && c.h <= 44)
+            .max_by_key(|c| c.area)
+            .map(|c| (c.cx as f64, c.cy as f64))
+    };
+    let (fx, fy) = pick(&blue)?;
+    let (tx, ty) = pick(&red)?;
+    Some(DragSolution { from: (fx, fy), to: (tx, ty) })
+}
+
 pub fn solve_letter_fill(px: &[u8], w: usize, h: usize) -> Result<DragSolution, String> {
+    // 条纹扭曲变体: 准星标注起点/落点, HSV 直解 (亮色匹配会被条纹骗出伪 from)
+    if let Some(sol) = try_crosshair_solve(px, w, h) {
+        println!(
+            "[drag] letter_fill 准星直解: from=({:.0},{:.0}) to=({:.0},{:.0})",
+            sol.from.0, sol.from.1, sol.to.0, sol.to.1
+        );
+        return Ok(sol);
+    }
     // 排除顶部 prompt 文字与底部按钮条 (均在画布上下边缘带)
     let y_lo = (h as f32 * 0.16) as usize;
     let y_hi = (h as f32 * 0.88) as usize;
@@ -830,6 +888,38 @@ pub fn solve_letter_fill(px: &[u8], w: usize, h: usize) -> Result<DragSolution, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn letter_fill_crosshair_variant() {
+        // 条纹扭曲变体: 蓝红准星直解 — 竖条纹背景 + 双十字准星
+        let (w, h) = (520usize, 392usize);
+        let mut px = vec![88u8; w * h * 3]; // 橄榄绿底
+        for x in (3..w).step_by(7) {
+            for y in 0..h {
+                let i = (y * w + x) * 3;
+                px[i] = 130;
+                px[i + 1] = 140;
+                px[i + 2] = 110; // 灰绿条纹
+            }
+        }
+        let cross = |px: &mut [u8], cx: i32, cy: i32, (r, g, b): (u8, u8, u8)| {
+            for d in -10..=10 {
+                for (x, y) in [(cx + d, cy), (cx, cy + d)] {
+                    if (0..w as i32).contains(&x) && (0..h as i32).contains(&y) {
+                        let i = ((y as usize * w) + x as usize) * 3;
+                        px[i] = r;
+                        px[i + 1] = g;
+                        px[i + 2] = b;
+                    }
+                }
+            }
+        };
+        cross(&mut px, 160, 282, (33, 150, 243)); // 蓝 +
+        cross(&mut px, 468, 274, (229, 57, 53)); // 红 +
+        let sol = solve("Drag the letter to the place where it fits", &px, w, h).unwrap();
+        assert!((sol.from.0 - 160.0).abs() < 4.0 && (sol.from.1 - 282.0).abs() < 4.0, "from={:?}", sol.from);
+        assert!((sol.to.0 - 468.0).abs() < 4.0 && (sol.to.1 - 274.0).abs() < 4.0, "to={:?}", sol.to);
+    }
 
     #[test]
     fn letter_fill_synthetic() {
