@@ -614,6 +614,11 @@ pub async fn register_one(
             if stop.load(Ordering::Relaxed) {
                 return Err("stopped".into());
             }
+            // deadline 必须在循环头: select-account/consent 分支 continue 会绕过尾部检查,
+            // 实测 URL 卡在 cloudaccounts 时 create_org 每 4s 重试 183 次永不超时 (2026-10-14)
+            if now() > deadline {
+                return Err("finalize timeout".into());
+            }
             // 尝试直接建 key
             if let Some(org) = get_org_name(&page).await {
                 log(&logf, &format!("[8] session 有效, org: {org}"));
@@ -639,7 +644,6 @@ pub async fn register_one(
                 continue;
             }
             if url_now.contains("select-account") || url_now.contains("cloudaccounts.nvidia.com") {
-                log(&logf, "[8] 创建组织页…");
                 create_org(&page, &cfg.org_name).await;
                 tokio::time::sleep(std::time::Duration::from_secs(4)).await;
                 continue;
@@ -648,9 +652,6 @@ pub async fn register_one(
                 consent_advance(&page, &logf).await;
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 continue;
-            }
-            if now() > deadline {
-                return Err("finalize timeout".into());
             }
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
