@@ -21,7 +21,7 @@ fn http() -> reqwest::Client {
     // 症状为 tile/VLM/moemail 统一 "error sending request" 而 curl 直测正常
     // (2026-10-14 [tile] 10 连败实证)。绑 v4 源地址强制走 IPv4。
     reqwest::Client::builder()
-        .local_address(Some("0.0.0.0:0".parse().expect("v4 addr")))
+        .local_address(Some("0.0.0.0:0".parse::<std::net::SocketAddr>().expect("v4 addr")))
         .build()
         .expect("http client")
 }
