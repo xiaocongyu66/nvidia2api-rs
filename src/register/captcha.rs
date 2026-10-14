@@ -17,7 +17,13 @@ pub struct SolverConfig {
 }
 
 fn http() -> reqwest::Client {
-    reqwest::Client::new()
+    // 本机 IPv6 出站已死 (实测 v6 直连秒拒, v4 通) — reqwest 抢 AAAA 连接即全灭,
+    // 症状为 tile/VLM/moemail 统一 "error sending request" 而 curl 直测正常
+    // (2026-10-14 [tile] 10 连败实证)。绑 v4 源地址强制走 IPv4。
+    reqwest::Client::builder()
+        .local_address(Some("0.0.0.0:0".parse().expect("v4 addr")))
+        .build()
+        .expect("http client")
 }
 
 // ---------------------------------------------------------------------------
